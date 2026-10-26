@@ -74,6 +74,12 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .mm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .mm-group { margin-top: 18px; }
 .mm-label { font-size: 12px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--teal); font-weight: 800; margin: 0 4px 8px; }
+.drop.wide { width: min(1180px, calc(100vw - 32px)); grid-template-columns: repeat(4, 1fr); gap: 4px 10px; max-height: calc(100vh - 86px); overflow-y: auto; }
+.drop-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mm-sub { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); font-weight: 800; margin: 6px 12px 4px; }
+.mm-group .drop-col + .drop-col { margin-top: 8px; }
+.tile .ext { font-style: normal; font-weight: 600; opacity: .55; font-size: .9em; }
+@media (max-width: 1180px) { .drop.wide { grid-template-columns: 1fr 1fr; } }
 .mobile-menu .tile { padding: 12px; font-size: 16px; }
 .mobile-menu .tile b { font-size: 16px; }
 

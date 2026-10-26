@@ -166,24 +166,32 @@
     ] },
     { key: 'about', label: 'About', href: '#about' },
   ];
-  const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}</b><span>${esc(it.sub)}</span></span></a>`;
+  const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}${it.ext ? ' <i class="ext">&#8599;</i>' : ''}</b><span>${esc(it.sub)}</span></span></a>`;
+  const groupTiles = g => `<div class="drop-col"><div class="mm-sub">${esc(g.title)}</div>${g.items.map(tile).join('')}</div>`;
 
-  // The Jira views come from the encrypted feed; only links to POA's own Jira site are shown.
-  function addJiraMenu() {
-    const icons = [['&#9636;', '--teal'], ['&#9783;', '--sky'], ['&#9873;', '--amber']];
-    const items = (S.feed.jiraViews || []).filter(v => /^https:\/\/poa-vince\.atlassian\.net\//.test(v.url || ''))
-      .map((v, i) => ({ href: v.url, label: v.label, sub: v.sub, ico: icons[i % 3][0], c: icons[i % 3][1], ext: true }));
-    if (items.length && !MENU.some(m => m.key === 'jira')) MENU.splice(MENU.length - 1, 0, { key: 'jira', label: 'Jira', items });
+  // The project views come from the encrypted feed, grouped Governance to Testing. Only site pages
+  // and links to POA's own Jira site and Google Drive are shown; outside links open in a new tab.
+  const VIEW_STYLE = { Governance: ['&#9878;', '--violet'], Requirements: ['&#9776;', '--teal'], Development: ['&#9635;', '--sky'], Testing: ['&#10003;', '--green'] };
+  function addViewsMenu() {
+    const groups = (S.feed.projectViews || []).map(g => {
+      const [ico, c] = VIEW_STYLE[g.group] || ['&#9656;', '--steel'];
+      const items = (g.items || []).filter(v => /^#[a-z-]+$/.test(v.url || '') || /^https:\/\/(poa-vince\.atlassian\.net|docs\.google\.com)\//.test(v.url || ''))
+        .map(v => ({ href: v.url, label: v.label, sub: v.sub, ico, c, ext: v.url.charAt(0) !== '#' }));
+      return { title: g.group, items };
+    }).filter(g => g.items.length);
+    if (groups.length && !MENU.some(m => m.key === 'views')) {
+      MENU.splice(MENU.length - 1, 0, { key: 'views', label: 'Project views', groups, items: groups.flatMap(g => g.items) });
+    }
   }
 
   function buildMenus() {
-    addJiraMenu();
+    addViewsMenu();
     $('#menu').innerHTML = MENU.map(m => m.items
       ? `<button type="button" data-drop="${m.key}" aria-expanded="false">${esc(m.label)}<span class="car">&#9662;</span></button>`
       : `<a href="${m.href}" data-key="${m.key}">${esc(m.label)}</a>`).join('');
     $('#mobileMenu').innerHTML = `<div class="mm-head"><span class="logo"><i>POA</i>POA</span><button type="button" class="icon-btn" id="mmClose" aria-label="Close menu">&#10005;</button></div>` +
       `<div class="mm-group">${tile({ href: '#home', label: 'Home', sub: 'Overview and headline charts', ico: '&#8962;', c: '--teal' })}</div>` +
-      MENU.filter(m => m.items).map(m => `<div class="mm-group"><div class="mm-label">${esc(m.label)}</div>${m.items.map(tile).join('')}</div>`).join('') +
+      MENU.filter(m => m.items).map(m => `<div class="mm-group"><div class="mm-label">${esc(m.label)}</div>${m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('')}</div>`).join('') +
       `<div class="mm-group">${tile({ href: '#about', label: 'About', sub: 'About this website', ico: '&#9432;', c: '--steel' })}</div>`;
     $('#menu').addEventListener('click', ev => {
       const b = ev.target.closest('[data-drop]');
@@ -202,7 +210,8 @@
   function openDrop(btn) {
     const m = MENU.find(x => x.key === btn.dataset.drop);
     const drop = $('#drop');
-    drop.innerHTML = m.items.map(tile).join('');
+    drop.innerHTML = m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('');
+    drop.classList.toggle('wide', !!m.groups);
     drop.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
     drop.addEventListener('click', ev => { if (ev.target.closest('a')) closeDrop(); }, { once: true });
