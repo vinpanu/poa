@@ -166,9 +166,18 @@
     ] },
     { key: 'about', label: 'About', href: '#about' },
   ];
-  const tile = it => `<a class="tile" href="${it.href}" style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}</b><span>${esc(it.sub)}</span></span></a>`;
+  const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}</b><span>${esc(it.sub)}</span></span></a>`;
+
+  // The Jira views come from the encrypted feed; only links to POA's own Jira site are shown.
+  function addJiraMenu() {
+    const icons = [['&#9636;', '--teal'], ['&#9783;', '--sky'], ['&#9873;', '--amber']];
+    const items = (S.feed.jiraViews || []).filter(v => /^https:\/\/poa-vince\.atlassian\.net\//.test(v.url || ''))
+      .map((v, i) => ({ href: v.url, label: v.label, sub: v.sub, ico: icons[i % 3][0], c: icons[i % 3][1], ext: true }));
+    if (items.length && !MENU.some(m => m.key === 'jira')) MENU.splice(MENU.length - 1, 0, { key: 'jira', label: 'Jira', items });
+  }
 
   function buildMenus() {
+    addJiraMenu();
     $('#menu').innerHTML = MENU.map(m => m.items
       ? `<button type="button" data-drop="${m.key}" aria-expanded="false">${esc(m.label)}<span class="car">&#9662;</span></button>`
       : `<a href="${m.href}" data-key="${m.key}">${esc(m.label)}</a>`).join('');
