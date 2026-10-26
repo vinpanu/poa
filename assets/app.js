@@ -349,13 +349,17 @@
     return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}<b>${esc(w.name)}</b>
       <div class="now">${w.now ? 'Now: ' + esc(w.now) : ''}${w.next && !w.closed ? '<br>Next: ' + esc(w.next) : ''}</div>${bar}</a>`;
   }
+  // When the summary was last checked, and a link to the document itself for its current version.
+  const govNote = g => [g.checked ? 'Summary checked ' + esc(fmtLong(parseDate(g.checked))) : '',
+    /^https:\/\/docs\.google\.com\//.test(g.url || '') ? `<a href="${esc(g.url)}" target="_blank" rel="noopener">Open the document &#8599;</a>` : ''].filter(Boolean).join(' · ');
   function govBlock(key) {
     const g = governance(key);
     if (!g) return '';
     const body = String(g.summary || '').split(/\n+/).map(l => l.trim()).filter(Boolean)
       .map(l => (l.length < 70 && !/[.:;]$/.test(l)) ? `<h4>${esc(l)}</h4>` : `<p>${esc(l)}</p>`).join('');
     return `${g.takeaways && g.takeaways.length ? `<div class="sec-title">Key points</div><div class="take">${g.takeaways.map((t, i) => `<div><i>${i + 1}</i>${esc(t)}</div>`).join('')}</div>` : ''}
-      <details class="more"><summary>Read the approved summary of the ${esc(g.title)} (version ${esc(g.revision)})</summary><div class="prose">${body}</div></details>`;
+      <details class="more"><summary>Read the approved summary of the ${esc(g.title)}</summary><div class="prose">${body}</div></details>
+      ${govNote(g) ? `<div class="sub" style="margin-top:8px">${govNote(g)}</div>` : ''}`;
   }
   function diagramSlot(key, opts = {}) {
     return `<figure class="figure rise"><button type="button" class="diag loading" data-diagram="${esc(key)}" aria-label="Open diagram full screen">Loading diagram…</button><figcaption data-cap="${esc(key)}"${opts.short ? ' data-short="1"' : ''}></figcaption></figure>`;
@@ -666,7 +670,7 @@
   function pageGovernance() {
     const gs = S.feed.governance || [];
     return head('How POA works &rsaquo; <b>Governance documents</b>', 'Governance documents', 'The documents that govern the project, with their approved summaries.') +
-      `<div class="wrap">${gs.map((g, i) => `<div class="card rise" style="animation-delay:${i * 40}ms"><h3>${esc(g.title)}</h3><div class="sub">Version ${esc(g.revision)}${g.effective ? ' · effective ' + esc(fmtLong(parseDate(g.effective))) : ''}</div>
+      `<div class="wrap">${gs.map((g, i) => `<div class="card rise" style="animation-delay:${i * 40}ms"><h3>${esc(g.title)}</h3><div class="sub">${govNote(g)}</div>
         ${g.takeaways.length ? `<div class="take" style="margin-top:12px">${g.takeaways.map((t, j) => `<div><i>${j + 1}</i>${esc(t)}</div>`).join('')}</div>` : ''}
         <details class="more" style="margin-top:12px"><summary>Read the approved summary</summary><div class="prose">${String(g.summary || '').split(/\n+/).filter(Boolean).map(l => (l.length < 70 && !/[.:;]$/.test(l)) ? `<h4>${esc(l)}</h4>` : `<p>${esc(l)}</p>`).join('')}</div></details></div>`).join('')}</div>`;
   }
