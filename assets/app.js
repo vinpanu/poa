@@ -160,7 +160,7 @@
       { href: '#missions', label: 'Missions', sub: 'Why five, and how they connect', ico: '&#9638;', c: '--steel' },
       { href: '#lifecycle', label: 'Delivery lifecycle', sub: 'Approved diagram', ico: '&#10140;', c: '--sky' },
       { href: '#testing', label: 'Testing', sub: 'Approved diagram and results', ico: '&#10003;', c: '--green' },
-      { href: '#architecture', label: 'Architecture and app preview', sub: 'Design figures and screens', ico: '&#9635;', c: '--purple' },
+      { href: '#architecture', label: 'Architecture', sub: 'Design figures', ico: '&#9635;', c: '--purple' },
       { href: '#team', label: 'Team and operating model', sub: 'Who decides, who delivers', ico: '&#9786;', c: '--teal' },
       { href: '#governance', label: 'Governance documents', sub: 'The approved summaries', ico: '&#9783;', c: '--steel' },
     ] },
@@ -645,13 +645,10 @@
     const intro = section('architecture', 'Intro');
     const fit = section('architecture', 'How the pieces fit together');
     const check = section('architecture', 'How a new entry is checked');
-    const screens = ['screen-food', 'screen-training', 'screen-cardio', 'screen-progress'];
-    return head('How POA works &rsaquo; <b>Architecture and app preview</b>', 'Architecture and app preview', intro.paras[0] || '') +
+    return head('How POA works &rsaquo; <b>Architecture</b>', 'Architecture', intro.paras[0] || '') +
       `<div class="wrap">
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('architecture')}</div><div class="card rise"><h3>${esc(fit.title || 'How the pieces fit together')}</h3><div class="prose" style="margin-top:8px">${paras(fit.paras)}</div></div></div>
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('capture')}</div><div class="card rise"><h3>${esc(check.title || 'How a new entry is checked')}</h3><div class="prose" style="margin-top:8px">${paras(check.paras)}</div></div></div>
-        <div class="sec-title">App preview <span class="sub" style="font-family:var(--body)">Illustrative screen concepts; every value is an example</span></div>
-        <div class="gallery">${screens.map(k => diagramSlot(k, { short: true })).join('')}</div>
       </div>`;
   }
 
