@@ -49,8 +49,9 @@
   }
   const getJson = path => fetch(path + '?t=' + Date.now(), { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(path + ' ' + r.status); return r.json(); });
 
-  const S = { key: null, keyInfo: null, bundle: null, feed: null, diagrams: null, diagramsPromise: null, charts: [] };
+  const S = { key: null, keyInfo: null, bundle: null, feed: null, copies: null, copy: {}, img: {}, charts: [] };
   const REMEMBER = 'poa-unlock';
+  const IDLE_LOCK = 30 * 60000;
 
   async function tryKey(key) {
     try { return (await unseal(key, S.keyInfo.check)) === 'POA'; } catch { return false; }
@@ -105,21 +106,37 @@
     $('#app').hidden = false;
     buildMenus();
     render();
+    idleLock();
   }
 
-  function getDiagrams() {
-    if (!S.diagramsPromise) {
-      S.diagramsPromise = getJson('data/diagrams.enc').then(box => unseal(S.key, box)).then(async d => {
-        const map = {};
-        for (const x of d.diagrams) {
-          const blob = await (await fetch('data:' + x.mime + ';base64,' + x.b64)).blob();
-          map[x.key] = { ...x, url: URL.createObjectURL(blob), b64: null };
-        }
-        S.diagrams = { builtAt: d.builtAt, map };
-        return S.diagrams;
-      }).catch(() => { S.diagramsPromise = null; return null; });
+  // Unless the site is remembered on this device, it locks itself after 30 minutes without use,
+  // so a public computer left open doesn't stay unlocked.
+  let idleTimer = null;
+  function idleLock() {
+    if (store.get(REMEMBER)) return;
+    const arm = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => { location.hash = ''; location.reload(); }, IDLE_LOCK); };
+    ['pointerdown', 'keydown', 'scroll'].forEach(ev => window.addEventListener(ev, arm, { passive: true }));
+    arm();
+  }
+
+  // Document copies: the list (with the diagrams), one file per copy, and images stored once each
+  // as raw bytes (a 12-byte IV, then the ciphertext).
+  function getCopies() {
+    if (!S.copies) S.copies = getJson('data/docs.enc').then(box => unseal(S.key, box)).catch(() => { S.copies = null; return null; });
+    return S.copies;
+  }
+  function getCopy(key) {
+    if (!S.copy[key]) S.copy[key] = getJson('data/docs/' + key + '.enc').then(box => unseal(S.key, box)).catch(() => { delete S.copy[key]; return null; });
+    return S.copy[key];
+  }
+  function getImage(id, mime) {
+    if (!S.img[id]) {
+      S.img[id] = fetch('data/img/' + id + '.bin').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(buf => crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(buf, 0, 12) }, S.key, new Uint8Array(buf, 12)))
+        .then(pt => URL.createObjectURL(new Blob([pt], { type: mime || 'image/png' })))
+        .catch(() => { delete S.img[id]; return null; });
     }
-    return S.diagramsPromise;
+    return S.img[id];
   }
 
   // ---------- model ----------
@@ -166,17 +183,23 @@
     ] },
     { key: 'about', label: 'About', href: '#about' },
   ];
-  const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}${it.ext ? ' <i class="ext">&#8599;</i>' : ''}</b><span>${esc(it.sub)}</span></span></a>`;
+  // Links that leave the site for Jira or Google Drive need Vince's sign-in there, so they say so:
+  // on a public computer he skips them and reads the copies instead.
+  const SIGN_IN = /^https:\/\/(docs\.google\.com|drive\.google\.com|[\w-]+\.atlassian\.net)\//;
+  const extMark = u => SIGN_IN.test(u) ? '<i class="ext">sign-in&nbsp;&#8599;</i>' : '<i class="ext">&#8599;</i>';
+  const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}${it.ext ? ' ' + extMark(it.href) : ''}</b><span>${esc(it.sub)}</span></span></a>`;
   const groupTiles = g => `<div class="drop-col"><div class="mm-sub">${esc(g.title)}</div>${g.items.map(tile).join('')}</div>`;
 
   // The project views come from the encrypted feed, grouped Governance to Testing. Only site pages
-  // and links to POA's own Jira site and Google Drive are shown; outside links open in a new tab.
+  // and links to POA's own Jira site and Google Drive are shown; a Drive document the site keeps a
+  // copy of opens the copy, and the rest open in a new tab.
   const VIEW_STYLE = { Governance: ['&#9878;', '--violet'], Requirements: ['&#9776;', '--teal'], Development: ['&#9635;', '--sky'], Testing: ['&#10003;', '--green'] };
   function addViewsMenu() {
     const groups = (S.feed.projectViews || []).map(g => {
       const [ico, c] = VIEW_STYLE[g.group] || ['&#9656;', '--steel'];
-      const items = (g.items || []).filter(v => /^#[a-z-]+$/.test(v.url || '') || /^https:\/\/(poa-vince\.atlassian\.net|docs\.google\.com)\//.test(v.url || ''))
-        .map(v => ({ href: v.url, label: v.label, sub: v.sub, ico, c, ext: v.url.charAt(0) !== '#' }));
+      const items = (g.items || []).filter(v => /^#[a-z0-9-]+$/.test(v.url || '') || /^https:\/\/(poa-vince\.atlassian\.net|docs\.google\.com)\//.test(v.url || ''))
+        .map(v => /^[a-z0-9-]+$/.test(v.copy || '') ? { href: '#doc-' + v.copy, label: v.label, sub: v.sub, ico, c }
+          : { href: v.url, label: v.label, sub: v.sub, ico, c, ext: v.url.charAt(0) !== '#' });
       return { title: g.group, items };
     }).filter(g => g.items.length);
     if (groups.length && !MENU.some(m => m.key === 'views')) {
@@ -349,9 +372,10 @@
     return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}<b>${esc(w.name)}</b>
       <div class="now">${w.now ? 'Now: ' + esc(w.now) : ''}${w.next && !w.closed ? '<br>Next: ' + esc(w.next) : ''}</div>${bar}</a>`;
   }
-  // When the summary was last checked, and a link to the document itself for its current version.
+  // When the summary was last checked, the site's copy of the whole document, and the original.
   const govNote = g => [g.checked ? 'Summary checked ' + esc(fmtLong(parseDate(g.checked))) : '',
-    /^https:\/\/docs\.google\.com\//.test(g.url || '') ? `<a href="${esc(g.url)}" target="_blank" rel="noopener">Open the document &#8599;</a>` : ''].filter(Boolean).join(' · ');
+    /^[a-z0-9-]+$/.test(g.copy || '') ? `<a href="#doc-${g.copy}">Read the full document</a>` : '',
+    /^https:\/\/docs\.google\.com\//.test(g.url || '') ? `<a href="${esc(g.url)}" target="_blank" rel="noopener">Original ${extMark(g.url)}</a>` : ''].filter(Boolean).join(' · ');
   function govBlock(key) {
     const g = governance(key);
     if (!g) return '';
@@ -364,20 +388,28 @@
   function diagramSlot(key, opts = {}) {
     return `<figure class="figure rise"><button type="button" class="diag loading" data-diagram="${esc(key)}" aria-label="Open diagram full screen">Loading diagram…</button><figcaption data-cap="${esc(key)}"${opts.short ? ' data-short="1"' : ''}></figcaption></figure>`;
   }
+  function showImage(slot, url, title) {
+    slot.classList.remove('loading');
+    slot.innerHTML = `<img src="${url}" alt="${esc(title)}"><span class="zoom-tag">&#10530; Tap to zoom</span>`;
+    slot.onclick = () => openZoom({ url, title });
+  }
+  // The diagrams are figures inside the document copies; each caption links to its copy.
   async function fillDiagrams(root) {
     const slots = root.querySelectorAll('[data-diagram]');
     if (!slots.length) return;
-    const d = await getDiagrams();
-    slots.forEach(slot => {
+    const idx = await getCopies();
+    const map = {};
+    ((idx && idx.diagrams) || []).forEach(d => { map[d.key] = d; });
+    slots.forEach(async slot => {
       const key = slot.dataset.diagram;
-      const x = d && d.map[key];
+      const x = map[key];
       const cap = root.querySelector(`[data-cap="${key}"]`);
-      if (!x) { slot.textContent = 'This diagram is not available yet.'; return; }
-      slot.classList.remove('loading');
-      slot.innerHTML = `<img src="${x.url}" alt="${esc(x.title)}"><span class="zoom-tag">&#10530; Tap to zoom</span>`;
-      slot.onclick = () => openZoom(x);
+      const url = x && await getImage(x.img, x.mime);
+      if (!url) { slot.textContent = 'This diagram is not available yet.'; return; }
+      showImage(slot, url, x.title);
       const draft = /draft/i.test(x.source) ? ' <span class="tag-draft">Draft</span>' : '';
-      if (cap) cap.innerHTML = cap.dataset.short ? esc(x.title) + draft : esc(x.title) + ' · ' + esc(x.source) + draft;
+      const source = /^[a-z0-9-]+$/.test(x.copy || '') ? `<a href="#doc-${x.copy}">${esc(x.source)}</a>` : esc(x.source);
+      if (cap) cap.innerHTML = cap.dataset.short ? esc(x.title) + draft : esc(x.title) + ' · ' + source + draft;
     });
   }
 
@@ -554,15 +586,19 @@
     });
     return head('Status &rsaquo; <b>Data health</b>', 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
       `<div class="wrap"><div class="card rise">${rows.map(r => `<div class="health-row"><span class="dot" style="background:${r.c}"></span><span><b>${esc(r.b)}</b><span>${esc(r.s)}</span></span></div>`).join('')}
-      <div class="health-row" id="diagHealth"><span class="dot" style="background:${css('--steel')}"></span><span><b>Diagrams</b><span>Checking…</span></span></div></div></div>`;
+      <div class="health-row" id="copyHealth"><span class="dot" style="background:${css('--steel')}"></span><span><b>Document copies and diagrams</b><span>Checking…</span></span></div></div></div>`;
   }
+  // Copies change only when their document does, so an old date is normal; a missing list is not.
   async function afterHealth(root) {
-    const d = await getDiagrams();
-    const el = $('#diagHealth', root);
+    const idx = await getCopies();
+    const el = $('#copyHealth', root);
     if (!el) return;
-    const b = d && parseDate(d.builtAt);
-    el.querySelector('.dot').style.background = b ? (daysSince(b) < 2 ? css('--green') : css('--amber')) : css('--rose');
-    el.querySelector('span span').textContent = b ? `${Object.keys(d.map).length} diagrams · refreshed ${fmtLong(b)}` : 'Not available';
+    const docs = idx ? Object.values(idx.docs || {}) : [];
+    const last = docs.map(d => parseDate(d.builtAt)).filter(Boolean).sort((a, b) => b - a)[0];
+    el.querySelector('.dot').style.background = docs.length ? css('--green') : css('--rose');
+    el.querySelector('span span').textContent = docs.length
+      ? `${docs.length} documents and ${(idx.diagrams || []).length} diagrams · checked every 15 minutes, last changed ${fmtLong(last)}`
+      : 'Not available';
   }
 
   const OBJ_COLORS = ['--teal', '--sky', '--violet', '--purple', '--green', '--orange', '--amber', '--steel'];
@@ -649,7 +685,123 @@
       `<div class="wrap">
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('architecture')}</div><div class="card rise"><h3>${esc(fit.title || 'How the pieces fit together')}</h3><div class="prose" style="margin-top:8px">${paras(fit.paras)}</div></div></div>
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('capture')}</div><div class="card rise"><h3>${esc(check.title || 'How a new entry is checked')}</h3><div class="prose" style="margin-top:8px">${paras(check.paras)}</div></div></div>
+        <div id="designMore"></div>
       </div>`;
+  }
+  // The design documents, and any of their figures not already shown above.
+  const DESIGN_DOCS = ['athlete-model', 'technical-design', 'build-package'];
+  async function afterArchitecture(root) {
+    const idx = await getCopies();
+    const box = $('#designMore', root);
+    if (!idx || !box) return;
+    const docs = DESIGN_DOCS.filter(k => idx.docs[k]);
+    const shown = new Set((idx.diagrams || []).map(d => d.img));
+    const figs = docs.flatMap(k => (idx.docs[k].figures || []).filter(f => f && !shown.has(f.img)).map(f => ({ ...f, k, doc: idx.docs[k].title })));
+    box.innerHTML = (figs.length ? `<div class="sec-title">More design figures</div><div class="grid g2" style="align-items:start">${figs.map((f, i) =>
+      `<figure class="figure rise"><button type="button" class="diag loading" data-fig="${i}" aria-label="Open diagram full screen">Loading diagram…</button><figcaption>${esc(f.cap || 'Figure')} · <a href="#doc-${esc(f.k)}">${esc(f.doc)}</a></figcaption></figure>`).join('')}</div>` : '') +
+      (docs.length ? `<div class="card rise"><h3>Read the design documents</h3><div class="rows" style="margin-top:10px">${docs.map(k => `<div><a href="#doc-${k}">${esc(idx.docs[k].title)}</a></div>`).join('')}</div></div>` : '');
+    box.querySelectorAll('[data-fig]').forEach(async slot => {
+      const f = figs[+slot.dataset.fig];
+      const url = await getImage(f.img, f.mime);
+      if (url) showImage(slot, url, f.cap || f.doc); else slot.textContent = 'This figure is not available yet.';
+    });
+  }
+
+  // ---------- document copies ----------
+  // Read-only copies of the project documents, so they can be read on any computer without a
+  // Google sign-in. All text is escaped; links go only to other copies, headings in the same copy
+  // or web pages (which open in a new tab).
+  function linkHtml(u, inner) {
+    if (/^#doc-[a-z0-9-]+$/.test(u)) return `<a href="${u}">${inner}</a>`;
+    if (u.startsWith('#h:')) return `<a href="#" data-jump="${esc(u.slice(3))}">${inner}</a>`;
+    if (/^https?:\/\//i.test(u)) return `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${inner} ${extMark(u)}</a>`;
+    return inner;
+  }
+  const runsHtml = runs => (runs || []).map(r => {
+    let h = esc(r.x).replace(/\n/g, '<br>');
+    if (r.n) return `<sup>${h}</sup>`;
+    if (r.c) h = `<code>${h}</code>`;
+    if (r.b) h = `<b>${h}</b>`;
+    if (r.i) h = `<em>${h}</em>`;
+    if (r.s) h = `<s>${h}</s>`;
+    return r.u ? linkHtml(r.u, h) : h;
+  }).join('');
+  const runsText = runs => (runs || []).map(r => r.x).join('');
+  function blocksHtml(blocks) {
+    return (blocks || []).map(b => {
+      const anchor = b.a ? ` data-anchor="${esc(b.a)}"` : '';
+      switch (b.t) {
+        case 'h': { const tag = 'h' + Math.min(5, Math.max(2, (b.l || 0) + 1)); return `<${tag}${anchor}>${runsHtml(b.r)}</${tag}>`; }
+        case 'tab': return `<h2 class="doc-tab"${anchor}>${esc(b.x)}</h2>`;
+        case 'p': return `<p${b.sub ? ' class="sub"' : ''}>${runsHtml(b.r)}</p>`;
+        case 'li': return `<div class="li" style="--l:${Number(b.l) || 0}"><span class="mk">${esc(b.m)}</span><span>${runsHtml(b.r)}</span></div>`;
+        case 'img': return b.i == null ? '<p class="sub">[A drawing only the original shows]</p>'
+          : `<figure class="doc-fig"><button type="button" class="diag loading" data-img="${Number(b.i)}" aria-label="Open image full screen">Loading image…</button></figure>`;
+        case 'table': return `<div class="tbl"><table>${(b.rows || []).map(r => `<tr>${r.map(c => `<td>${blocksHtml(c)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+        case 'hr': return '<hr>';
+        case 'notes': return `<div class="notes"><h4>Notes</h4><ol>${(b.items || []).map(it => `<li>${blocksHtml(it)}</li>`).join('')}</ol></div>`;
+        default: return '';
+      }
+    }).join('');
+  }
+  // A sheet tab as one card per row, labelled by the header row, so it reads on a phone too.
+  // A tab of label and value pairs (two columns at most) reads as plain lines instead. Each tab
+  // folds away (the first starts open), since a long tab is thousands of pixels on a phone.
+  function sheetHtml(s, i) {
+    const rows = (s.rows || []).filter(r => r.some(Boolean));
+    const fold = (count, inner) => `<details class="sheet" data-anchor="sheet-${i}"${i === 0 ? ' open' : ''}><summary><h2>${esc(s.title)}</h2><span class="sub">${count}</span></summary>${inner}</details>`;
+    if (rows.every(r => r.slice(2).every(v => !v))) {
+      return fold(rows.length + ' lines', `<div class="rowcards"><div class="rowcard pairs">${rows.map(r =>
+        `<p>${r[0] && r[1] ? `<b>${esc(r[0])}</b> ` : ''}${esc(r[0] && r[1] ? r[1] : r[0] || r[1])}</p>`).join('')}</div></div>`);
+    }
+    const hi = rows.findIndex(r => r.filter(Boolean).length >= 2);
+    const head = hi < 0 ? [] : rows[hi];
+    const before = (hi < 0 ? rows : rows.slice(0, hi)).map(r => `<p class="sub">${esc(r.filter(Boolean).join(' · '))}</p>`).join('');
+    const body = hi < 0 ? [] : rows.slice(hi + 1);
+    const cards = body.map(r => `<div class="rowcard"><b>${esc(r[0] || '')}</b>${r.slice(1).map((v, j) =>
+      v ? `<div><span>${esc(head[j + 1] || '')}</span>${esc(v)}</div>` : '').join('')}</div>`).join('');
+    return fold(body.length + ' rows', `${before}<div class="rowcards">${cards}</div>`);
+  }
+
+  function pageDoc(route) {
+    return head('Project views &rsaquo; <b>Document</b>', 'Opening the document…', '') + `<div class="wrap" id="docPage"></div>`;
+  }
+  async function afterDoc(root, route) {
+    const d = await getCopy(route.slice(4));
+    if (location.hash.slice(1) !== route || !$('#docPage', root)) return;
+    const built = d && parseDate(d.builtAt);
+    const original = d && /^https:\/\/docs\.google\.com\//.test(d.original || '') ? `<a href="${esc(d.original)}" target="_blank" rel="noopener">Open the original ${extMark(d.original)}</a>` : '';
+    if (!d) {
+      $('.page-head h1', root).textContent = 'Not available yet';
+      $('#docPage', root).innerHTML = '<div class="card"><p class="empty">This document has no copy on the site yet. Copies appear within about 15 minutes of a document being added.</p></div>';
+      return;
+    }
+    document.title = d.title + ' · POA';
+    $('.page-head h1', root).textContent = d.title;
+    $('.page-head', root).insertAdjacentHTML('beforeend', `<p class="lead">Read-only copy${built ? ', updated ' + esc(fmtLong(built)) + ', ' + esc(fmtTime(built)) : ''}. It changes when the original does.</p>${original ? `<div class="sub" style="margin-top:6px">${original}</div>` : ''}`);
+    let body, toc;
+    if (d.kind === 'sheet') {
+      toc = (d.sheets || []).map((s, i) => ({ a: 'sheet-' + i, text: s.title, l: 1 }));
+      body = `<input class="search" id="rowFilter" type="search" placeholder="Filter rows" aria-label="Filter rows">` + (d.sheets || []).map(sheetHtml).join('');
+    } else {
+      // Top-level headings get anchors for the contents list and for links between headings.
+      (d.blocks || []).forEach((b, i) => { if (b.t === 'h' || b.t === 'tab') b.a = b.id || 's' + i; });
+      toc = (d.blocks || []).filter(b => b.t === 'tab' || (b.t === 'h' && b.l <= 2)).map(b => ({ a: b.a, text: b.t === 'tab' ? b.x : runsText(b.r), l: b.t === 'tab' ? 0 : Math.max(1, b.l) }));
+      body = blocksHtml(d.blocks);
+    }
+    const contents = toc.length >= 4 ? `<details class="more toc"><summary>Contents</summary><div>${toc.map(t => `<a href="#" data-jump="${esc(t.a)}" style="--l:${t.l}">${esc(t.text)}</a>`).join('')}</div></details>` : '';
+    $('#docPage', root).innerHTML = `${contents}<div class="card doc rise"><div class="prose doc-body">${body}</div></div>`;
+    root.querySelectorAll('[data-img]').forEach(async slot => {
+      const im = (d.images || [])[+slot.dataset.img];
+      const url = im && im.id && await getImage(im.id, im.mime);
+      if (url) showImage(slot, url, im.alt || d.title); else slot.outerHTML = '<p class="sub">[An image only the original shows]</p>';
+    });
+    const filter = $('#rowFilter', root);
+    if (filter) filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      root.querySelectorAll('.rowcard').forEach(c => { c.hidden = !!q && !c.textContent.toLowerCase().includes(q); });
+      if (q) root.querySelectorAll('details.sheet').forEach(t => { t.open = !!t.querySelector('.rowcard:not([hidden])'); });
+    });
   }
 
   function pageTeam() {
@@ -682,7 +834,7 @@
     roadmap: [pageRoadmap, root => gantt($('#gantt', root), window.innerWidth < 700), 'Roadmap'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
-    architecture: [pageArchitecture, null, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],
+    architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],
   };
 
   function render() {
@@ -697,6 +849,10 @@
         afterWorkstream(view, route);
         const w = workstreams().find(x => slug(x.id) === route);
         title = w ? w.name : 'Workstream';
+      } else if (/^doc-[a-z0-9-]+$/.test(route)) {
+        view.innerHTML = pageDoc(route);
+        afterDoc(view, route);
+        title = 'Document';
       } else {
         const r = ROUTES[route] || ROUTES.home;
         view.innerHTML = r[0]();
@@ -718,6 +874,15 @@
   }
 
   window.addEventListener('hashchange', () => { if (S.feed) { render(); window.scrollTo(0, 0); } });
+  // Contents entries and links between headings scroll within the page instead of changing route.
+  $('#view').addEventListener('click', ev => {
+    const a = ev.target.closest('[data-jump]');
+    if (!a) return;
+    ev.preventDefault();
+    const target = [...$('#view').querySelectorAll('[data-anchor]')].find(el => el.dataset.anchor === a.dataset.jump);
+    if (target && target.tagName === 'DETAILS') target.open = true;
+    if (target) target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  });
 
   // ---------- zoom ----------
   function openZoom(x) {
@@ -736,7 +901,7 @@
   $('#lockBtn').addEventListener('click', () => { store.del(REMEMBER); location.hash = ''; location.reload(); });
   $('#refreshBtn').addEventListener('click', async () => {
     const b = $('#refreshBtn'); b.textContent = 'Refreshing…';
-    try { await loadData(); S.diagramsPromise = null; render(); } catch {}
+    try { await loadData(); S.copies = null; S.copy = {}; render(); } catch {}
     b.textContent = 'Refresh';
   });
   $('#themeBtn').addEventListener('click', () => {

@@ -244,3 +244,44 @@ details.more .prose { margin-top: 12px; }
   .wrap { gap: 14px; padding-top: 16px; }
   .card { padding: 14px; }
 }
+
+/* Links that leave the site; "sign-in" marks the ones that need Vince's Jira or Google sign-in. */
+.ext { font-style: normal; font-weight: 700; font-size: .78em; opacity: .7; white-space: nowrap; }
+.remember-hint { font-size: 12.5px; color: var(--muted); margin: -6px 0 4px 30px; }
+
+/* Document copies */
+.doc-body { max-width: 860px; }
+.doc-body p, .doc-body .li { max-width: 74ch; overflow-wrap: anywhere; }
+.doc-body h2, .doc-body h3, .doc-body h4, .doc-body h5 { font-family: var(--display); line-height: 1.3; margin: 26px 0 8px; }
+.doc-body h2 { font-size: 21px; } .doc-body h3 { font-size: 17.5px; } .doc-body h4 { font-size: 15.5px; } .doc-body h5 { font-size: 14.5px; color: var(--ink-2); }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body .doc-tab { font-size: 24px; padding-top: 18px; border-top: 2px solid var(--line-2); }
+.doc-body .li { display: flex; gap: 8px; font-size: 15.5px; line-height: 1.55; color: var(--ink-2); margin: 0 0 6px calc(var(--l, 0) * 22px); }
+.doc-body .li .mk { flex: 0 0 auto; min-width: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.doc-body code { font-size: .92em; background: color-mix(in srgb, var(--ink) 8%, transparent); border-radius: 6px; padding: 1px 5px; }
+.doc-body hr { border: 0; border-top: 1px solid var(--line-2); margin: 18px 0; }
+.doc-body .doc-fig { margin: 12px 0 16px; max-width: 860px; }
+.doc-body .tbl { overflow-x: auto; margin: 10px 0 16px; border: 1px solid var(--line); border-radius: 12px; }
+.doc-body table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.doc-body td { border: 1px solid var(--line); padding: 8px 10px; vertical-align: top; min-width: 120px; }
+.doc-body tr:first-child td { background: color-mix(in srgb, var(--ink) 6%, transparent); font-weight: 700; }
+.doc-body td p, .doc-body td .li { font-size: 14px; margin-bottom: 6px; }
+.doc-body td > :last-child { margin-bottom: 0; }
+.doc-body .notes { margin-top: 20px; font-size: 14px; }
+[data-anchor] { scroll-margin-top: 84px; }
+details.toc > div { display: grid; gap: 2px; margin-top: 10px; }
+details.toc a { text-decoration: none; padding: 6px 0 6px calc((var(--l, 1) - 1) * 16px); font-size: 14.5px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+.rowcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin: 8px 0 18px; }
+.rowcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 14px; overflow-wrap: anywhere; }
+.rowcard b { display: block; font-family: var(--display); font-size: 15px; margin-bottom: 6px; }
+.rowcard div { padding: 3px 0; color: var(--ink-2); }
+details.sheet { border-top: 1px solid var(--line); padding: 4px 0; }
+details.sheet summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px; padding: 10px 0; list-style: none; }
+details.sheet summary::-webkit-details-marker { display: none; }
+details.sheet summary::before { content: "\25B8"; color: var(--teal); }
+details.sheet[open] summary::before { content: "\25BE"; }
+details.sheet summary h2 { margin: 0; }
+.rowcard.pairs { grid-column: 1 / -1; }
+.rowcard.pairs p { margin: 0 0 8px; font-size: 14.5px; }
+.rowcard.pairs b { display: inline; font-size: 14.5px; margin: 0 6px 0 0; }
+.rowcard div span { display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); }
