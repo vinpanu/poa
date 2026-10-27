@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-2o9eiOjOxnXT3YviP99xALpgVWVpwDJqx5FMyDrl1Fo='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
+<title>POA sign-in</title>
+<!-- POA connector sign-in page (Build Package M3-PK001, task T08; Registry decision D-0095).
+     Supabase Auth's OAuth server sends the browser here with an authorization_id when Claude connects
+     to POA. The owner signs in, then allows or refuses. Nothing is stored on the device: the session
+     lives only in this page. The publishable key below is public by design and opens nothing in POA. -->
+<style>
+:root { --bg:#f6f6f3; --card:#ffffff; --text:#1d1d1b; --muted:#5d5d58; --line:#d6d6d0; --accent:#1f5f8b; --on-accent:#ffffff; --bad:#a1260d; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#161615; --card:#21211f; --text:#ececea; --muted:#a8a8a2; --line:#3a3a37; --accent:#7ab3dc; --on-accent:#0d1b26; --bad:#f39274; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 26rem; margin: 0 auto; padding: 2.5rem 16px; }
+h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+p { margin: .5rem 0; }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; margin-top: 1.25rem; }
+label { display: block; font-weight: 600; margin: .75rem 0 .25rem; }
+input { width: 100%; font: inherit; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+button { width: 100%; font: inherit; font-weight: 600; padding: .7rem 1rem; margin-top: 1rem; border-radius: 8px; border: 1px solid var(--accent); cursor: pointer; }
+.primary { background: var(--accent); color: var(--on-accent); }
+.secondary { background: transparent; color: var(--accent); }
+button:disabled { opacity: .6; cursor: default; }
+.error { color: var(--bad); font-weight: 600; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>POA</h1>
+  <p class="muted">Sign in to connect Claude to POA. Only the POA owner's account can sign in.</p>
+
+  <section class="card" id="signin" hidden>
+    <form id="signin-form">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <section class="card" id="consent" hidden>
+    <p><strong id="client-name">Claude</strong> asks to connect to POA.</p>
+    <p class="muted">You can remove the connection any time in Claude's connector settings.</p>
+    <button class="primary" id="approve" type="button">Allow</button>
+    <button class="secondary" id="deny" type="button">Don't allow</button>
+  </section>
+
+  <p id="message" class="muted" role="status" aria-live="polite"></p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js" integrity="sha384-BWcjm9OdFth9TbhCxZPdm+gAOUMAzQy9nmTs12ioXdCcbVnJaPMn+fMUoQCLt60R" crossorigin="anonymous"></script>
+<script>
+"use strict";
+const SUPABASE_URL = "https://djkomeqozlulwepehoej.supabase.co";
+const PUBLISHABLE_KEY = "sb_publishable_AsKogB7gcYgWDzNFwekgUw_FJXobyp0";
+const client = supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
+const authorizationId = new URLSearchParams(location.search).get("authorization_id");
+const $ = (id) => document.getElementById(id);
+
+function say(text, bad) {
+  $("message").textContent = text;
+  $("message").className = bad ? "error" : "muted";
+}
+
+function goBack(url) {
+  say("Returning to Claude...");
+  location.assign(url);
+}
+
+async function showConsent() {
+  const { data, error } = await client.auth.oauth.getAuthorizationDetails(authorizationId);
+  if (error || !data) return say((error && error.message) || "This sign-in request has expired. Start again from Claude.", true);
+  if (!("authorization_id" in data)) return goBack(data.redirect_url); // allowed before
+  $("client-name").textContent = (data.client && data.client.name) || "An app";
+  $("signin").hidden = true;
+  $("consent").hidden = false;
+  say("");
+}
+
+async function decide(allow) {
+  $("approve").disabled = $("deny").disabled = true;
+  const { data, error } = allow
+    ? await client.auth.oauth.approveAuthorization(authorizationId)
+    : await client.auth.oauth.denyAuthorization(authorizationId);
+  if (error || !data || !data.redirect_url) {
+    $("approve").disabled = $("deny").disabled = false;
+    return say((error && error.message) || "That didn't work. Start again from Claude.", true);
+  }
+  goBack(data.redirect_url);
+}
+
+$("signin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.target.querySelector("button");
+  button.disabled = true;
+  say("Signing in...");
+  const { error } = await client.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+  $("password").value = "";
+  button.disabled = false;
+  if (error) return say("Sign-in failed: " + error.message, true);
+  await showConsent();
+});
+$("approve").addEventListener("click", () => decide(true));
+$("deny").addEventListener("click", () => decide(false));
+
+if (!authorizationId) {
+  say("Open this page from Claude's Connect button. It needs a sign-in request.", true);
+} else {
+  $("signin").hidden = false;
+  $("email").focus();
+}
+</script>
+</body>
+</html>
