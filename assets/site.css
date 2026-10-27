@@ -57,7 +57,7 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .nav { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 22px; padding: 12px var(--gutter); padding-top: max(12px, env(safe-area-inset-top, 0px));
   background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); }
 .menu { display: flex; gap: 4px; }
-.menu a, .menu button { color: var(--ink); text-decoration: none; padding: 9px 14px; border-radius: 10px; font-weight: 700; font-size: 15px; background: none; border: 0; }
+.menu a, .menu button { color: var(--ink); text-decoration: none; padding: 9px 14px; border-radius: 10px; font-weight: 700; font-size: 15px; background: none; border: 0; white-space: nowrap; }
 .menu a:hover, .menu button:hover, .menu .on { background: color-mix(in srgb, var(--teal) 14%, transparent); color: var(--teal); }
 .menu .car { opacity: .6; margin-left: 4px; font-size: 11px; }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
@@ -74,7 +74,7 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .mm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .mm-group { margin-top: 18px; }
 .mm-label { font-size: 12px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--teal); font-weight: 800; margin: 0 4px 8px; }
-.drop.wide { width: min(1180px, calc(100vw - 32px)); grid-template-columns: repeat(4, 1fr); gap: 4px 10px; max-height: calc(100vh - 86px); overflow-y: auto; }
+.drop.wide { width: min(calc(var(--cols, 2) * 310px), calc(100vw - 32px)); grid-template-columns: repeat(var(--cols, 2), 1fr); gap: 4px 10px; max-height: calc(100vh - 86px); overflow-y: auto; }
 .drop-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mm-sub { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); font-weight: 800; margin: 6px 12px 4px; }
 .mm-group .drop-col + .drop-col { margin-top: 8px; }
@@ -87,7 +87,11 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .view { display: block; outline: none; }
 .wrap { max-width: 1240px; margin: 0 auto; padding: 24px var(--gutter) 40px; display: grid; gap: 18px; }
 .grid { display: grid; gap: 18px; }
-.g2 { grid-template-columns: 1.3fr 1fr; } .g3 { grid-template-columns: 1.05fr 1fr 1fr; } .g-half { grid-template-columns: 1fr 1fr; }
+.g2 { grid-template-columns: 1.3fr 1fr; } .g-half { grid-template-columns: 1fr 1fr; }
+/* Two side by side on every screen, like the progress rings. */
+.g-pair { grid-template-columns: 1fr 1fr; }
+/* Sections the Status page opens at, clear of the sticky menu bar. */
+#sec-waiting, #sec-workstreams { scroll-margin-top: 84px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0; }
 .card h3 { margin: 0 0 2px; font-size: 16.5px; }
 .sub { color: var(--muted); font-size: 13px; }
@@ -114,8 +118,16 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .kpi .spark i { display: block; height: 100%; border-radius: 99px; transition: width 1s ease; }
 
 /* ---------- lists and chips ---------- */
-.need { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--ink); }
+.need { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
 .need:last-child { border-bottom: 0; }
+.need-body { flex: 1; min-width: 0; }
+.need-head { display: block; color: inherit; text-decoration: none; }
+.need-detail { font-size: 14px; line-height: 1.5; margin-top: 8px; color: var(--ink); max-width: 80ch; }
+.need-detail p { margin: 0 0 4px; }
+.need-detail ol, .need-detail ul { margin: 4px 0 0; padding-left: 22px; }
+.need-detail li { margin: 0 0 6px; }
+.need .go { text-decoration: none; }
+.callout .need-detail { margin-top: 10px; }
 .need .dot { flex: 0 0 10px; height: 10px; border-radius: 50%; margin-top: 7px; background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 18%, transparent); }
 .need .dot.red { background: var(--rose); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rose) 18%, transparent); }
 .need b { display: block; font-size: 15px; } .need span { font-size: 13px; color: var(--muted); }
@@ -222,25 +234,30 @@ details.more .prose { margin-top: 12px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1020px) {
-  .g3 { grid-template-columns: 1fr 1fr; } .g3 > :first-child { grid-column: 1 / -1; }
   .g2 { grid-template-columns: 1fr; }
 }
-@media (max-width: 860px) {
-  .menu, .logo-text, .drop { display: none !important; }
+/* The four menus need about 1000px; narrower screens use the menu button. */
+@media (max-width: 1200px) {
+  .logo-text { display: none; }
   .logo-short { display: inline; }
+}
+@media (max-width: 1000px) {
+  .menu, .drop { display: none !important; }
   .burger { display: grid; }
   .nav { gap: 10px; }
   .pill { padding: 6px 10px; font-size: 12.5px; }
   .pill .pill-long { display: none; }
   .pill .pill-short { display: inline; }
+}
+@media (max-width: 860px) {
   .kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
   .kpi { padding: 12px 14px; } .kpi .v { font-size: 27px; }
   .hero { padding-top: 26px; }
   .g-half { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
-  .g3 { grid-template-columns: 1fr 1fr; }
-  .g3 .card.ring { padding: 12px; }
+  .g-pair { gap: 10px; }
+  .card.ring { padding: 12px; }
   .wrap { gap: 14px; padding-top: 16px; }
   .card { padding: 14px; }
 }

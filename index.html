@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="assets/site.css?v=3">
+<link rel="stylesheet" href="assets/site.css?v=4">
 <script>try { var t = localStorage.getItem('poa-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
@@ -33,7 +33,7 @@
 
 <div id="app" hidden>
   <header class="nav">
-    <a class="logo" href="#home" aria-label="POA home"><i>POA</i><span class="logo-text">Physique Optimization Agent</span><span class="logo-short">POA</span></a>
+    <a class="logo" href="#home" aria-label="POA status"><i>POA</i><span class="logo-text">Physique Optimization Agent</span><span class="logo-short">POA</span></a>
     <nav class="menu" id="menu" aria-label="Main"></nav>
     <div class="nav-right">
       <a class="pill" id="waitPill" href="#waiting"><span class="pill-long">Waiting on Vince</span><span class="pill-short">Waiting</span> <b id="waitCount">0</b></a>
@@ -46,7 +46,7 @@
   <main id="view" class="view" tabindex="-1"></main>
   <footer class="site-foot">
     <span id="builtAt"></span>
-    <span class="foot-actions"><button type="button" id="refreshBtn" class="link-btn">Refresh</button><button type="button" id="lockBtn" class="link-btn">Lock site</button></span>
+    <span class="foot-actions"><a href="#about" class="link-btn">About</a><button type="button" id="refreshBtn" class="link-btn">Refresh</button><button type="button" id="lockBtn" class="link-btn">Lock site</button></span>
   </footer>
 </div>
 
@@ -57,6 +57,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js" defer></script>
-<script src="assets/app.js?v=5" defer></script>
+<script src="assets/app.js?v=6" defer></script>
 </body>
 </html>

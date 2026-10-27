@@ -162,26 +162,16 @@
   const measureLabel = m => /scope/i.test(m) ? 'product capabilities fully defined' : /question/i.test(m) ? 'coaching questions fully answered' : String(m || '').toLowerCase();
 
   // ---------- menus ----------
+  // Status (the home page and its detail pages), then Governance, Requirements and design, and Testing
+  // from the encrypted feed (Vince, 2026-10-27).
   const MENU = [
-    { key: 'home', label: 'Home', href: '#home' },
     { key: 'status', label: 'Status', items: [
-      { href: '#waiting', label: 'Waiting on Vince', sub: 'Answers, interviews and decisions', ico: '&#9873;', c: '--amber' },
-      { href: '#workstreams', label: 'Workstreams', sub: 'Done, now and next for each', ico: '&#9776;', c: '--teal' },
+      { href: '#home', label: 'Status overview', sub: 'Waiting on you, progress and what’s next', ico: '&#8962;', c: '--teal' },
       { href: '#roadmap', label: 'Roadmap and milestones', sub: 'Target windows to launch', ico: '&#9719;', c: '--sky' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
       { href: '#trends', label: 'Progress trends', sub: 'Coverage over time', ico: '&#9650;', c: '--green' },
       { href: '#health', label: 'Data health', sub: 'When each source last refreshed', ico: '&#9881;', c: '--orange' },
     ] },
-    { key: 'how', label: 'How POA works', items: [
-      { href: '#goal', label: 'The goal', sub: 'What POA has to do', ico: '&#9737;', c: '--orange' },
-      { href: '#missions', label: 'Missions', sub: 'Why five, and how they connect', ico: '&#9638;', c: '--steel' },
-      { href: '#lifecycle', label: 'Delivery lifecycle', sub: 'Approved diagram', ico: '&#10140;', c: '--sky' },
-      { href: '#testing', label: 'Testing', sub: 'Approved diagram and results', ico: '&#10003;', c: '--green' },
-      { href: '#architecture', label: 'Architecture', sub: 'Design figures', ico: '&#9635;', c: '--purple' },
-      { href: '#team', label: 'Team and operating model', sub: 'Who decides, who delivers', ico: '&#9786;', c: '--teal' },
-      { href: '#governance', label: 'Governance documents', sub: 'The approved summaries', ico: '&#9783;', c: '--steel' },
-    ] },
-    { key: 'about', label: 'About', href: '#about' },
   ];
   // Links that leave the site for Jira or Google Drive need Vince's sign-in there, so they say so:
   // on a public computer he skips them and reads the copies instead.
@@ -190,31 +180,37 @@
   const tile = it => `<a class="tile" href="${esc(it.href)}"${it.ext ? ' target="_blank" rel="noopener"' : ''} style="--c:var(${it.c})"><span class="ico">${it.ico}</span><span><b>${esc(it.label)}${it.ext ? ' ' + extMark(it.href) : ''}</b><span>${esc(it.sub)}</span></span></a>`;
   const groupTiles = g => `<div class="drop-col"><div class="mm-sub">${esc(g.title)}</div>${g.items.map(tile).join('')}</div>`;
 
-  // The project views come from the encrypted feed, grouped Governance to Testing. Only site pages
-  // and links to POA's own Jira site and Google Drive are shown; a Drive document the site keeps a
-  // copy of opens the copy, and the rest open in a new tab.
-  const VIEW_STYLE = { Governance: ['&#9878;', '--violet'], Requirements: ['&#9776;', '--teal'], Development: ['&#9635;', '--sky'], Testing: ['&#10003;', '--green'] };
-  function addViewsMenu() {
-    const groups = (S.feed.projectViews || []).map(g => {
-      const [ico, c] = VIEW_STYLE[g.group] || ['&#9656;', '--steel'];
-      const items = (g.items || []).filter(v => /^#[a-z0-9-]+$/.test(v.url || '') || /^https:\/\/(poa-vince\.atlassian\.net|docs\.google\.com)\//.test(v.url || ''))
-        .map(v => /^[a-z0-9-]+$/.test(v.copy || '') ? { href: '#doc-' + v.copy, label: v.label, sub: v.sub, ico, c }
-          : { href: v.url, label: v.label, sub: v.sub, ico, c, ext: v.url.charAt(0) !== '#' });
-      return { title: g.group, items };
-    }).filter(g => g.items.length);
-    if (groups.length && !MENU.some(m => m.key === 'views')) {
-      MENU.splice(MENU.length - 1, 0, { key: 'views', label: 'Project views', groups, items: groups.flatMap(g => g.items) });
-    }
+  // The feed's menus. Only site pages and links to POA's own Jira site and Google Drive are shown; a
+  // Drive document the site keeps a copy of opens the copy, and the rest open in a new tab. Site pages
+  // keep their own icons; other links take one for their kind, in their menu's color.
+  const PAGE_ICON = { '#goal': ['&#9737;', '--orange'], '#missions': ['&#9638;', '--steel'], '#team': ['&#9786;', '--teal'], '#lifecycle': ['&#10140;', '--sky'],
+    '#governance': ['&#9783;', '--steel'], '#architecture': ['&#9635;', '--purple'], '#testing': ['&#10003;', '--green'] };
+  const MENU_COLOR = { governance: '--violet', reqdesign: '--teal', testing: '--green' };
+  function addFeedMenus() {
+    (S.feed.menus || []).forEach(m => {
+      if (!/^[a-z]+$/.test(m.key || '') || MENU.some(x => x.key === m.key)) return;
+      const c = MENU_COLOR[m.key] || '--steel';
+      const groups = (m.groups || []).map(g => {
+        const items = (g.items || []).filter(v => /^#[a-z0-9-]+$/.test(v.url || '') || /^https:\/\/(poa-vince\.atlassian\.net|docs\.google\.com)\//.test(v.url || ''))
+          .map(v => {
+            if (/^[a-z0-9-]+$/.test(v.copy || '')) return { href: '#doc-' + v.copy, label: v.label, sub: v.sub, ico: '&#9783;', c };
+            if (PAGE_ICON[v.url]) return { href: v.url, label: v.label, sub: v.sub, ico: PAGE_ICON[v.url][0], c: PAGE_ICON[v.url][1] };
+            return { href: v.url, label: v.label, sub: v.sub, ico: /atlassian/.test(v.url) ? '&#9776;' : '&#9638;', c, ext: v.url.charAt(0) !== '#' };
+          });
+        return { title: g.group, items };
+      }).filter(g => g.items.length);
+      if (groups.length) MENU.push({ key: m.key, label: m.label, groups: groups.length > 1 ? groups : null, items: groups.flatMap(g => g.items) });
+    });
   }
+  // The menu that holds a page, for the highlighted menu and the page's breadcrumb.
+  const menuOf = route => (route === 'home' || route.startsWith('ws-')) ? MENU[0] : MENU.find(m => m.items.some(i => i.href === '#' + route));
+  const crumb = (route, title) => { const m = menuOf(route); return (m ? esc(m.label) + ' &rsaquo; ' : '') + '<b>' + esc(title) + '</b>'; };
 
   function buildMenus() {
-    addViewsMenu();
-    $('#menu').innerHTML = MENU.map(m => m.items
-      ? `<button type="button" data-drop="${m.key}" aria-expanded="false">${esc(m.label)}<span class="car">&#9662;</span></button>`
-      : `<a href="${m.href}" data-key="${m.key}">${esc(m.label)}</a>`).join('');
+    addFeedMenus();
+    $('#menu').innerHTML = MENU.map(m => `<button type="button" data-drop="${m.key}" aria-expanded="false">${esc(m.label)}<span class="car">&#9662;</span></button>`).join('');
     $('#mobileMenu').innerHTML = `<div class="mm-head"><span class="logo"><i>POA</i>POA</span><button type="button" class="icon-btn" id="mmClose" aria-label="Close menu">&#10005;</button></div>` +
-      `<div class="mm-group">${tile({ href: '#home', label: 'Home', sub: 'Overview and headline charts', ico: '&#8962;', c: '--teal' })}</div>` +
-      MENU.filter(m => m.items).map(m => `<div class="mm-group"><div class="mm-label">${esc(m.label)}</div>${m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('')}</div>`).join('') +
+      MENU.map(m => `<div class="mm-group"><div class="mm-label">${esc(m.label)}</div>${m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('')}</div>`).join('') +
       `<div class="mm-group">${tile({ href: '#about', label: 'About', sub: 'About this website', ico: '&#9432;', c: '--steel' })}</div>`;
     $('#menu').addEventListener('click', ev => {
       const b = ev.target.closest('[data-drop]');
@@ -235,6 +231,7 @@
     const drop = $('#drop');
     drop.innerHTML = m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('');
     drop.classList.toggle('wide', !!m.groups);
+    drop.style.setProperty('--cols', m.groups ? m.groups.length : 2);
     drop.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
     drop.addEventListener('click', ev => { if (ev.target.closest('a')) closeDrop(); }, { once: true });
@@ -244,11 +241,8 @@
     document.querySelectorAll('[data-drop]').forEach(b => b.setAttribute('aria-expanded', 'false'));
   }
   function markMenu(route) {
-    const group = MENU.find(m => m.items && m.items.some(i => i.href === '#' + route));
-    document.querySelectorAll('#menu > *').forEach(el => {
-      const on = (el.dataset.key && el.dataset.key === route) || (group && el.dataset.drop === group.key) || (route.startsWith('ws-') && el.dataset.drop === 'status');
-      el.classList.toggle('on', !!on);
-    });
+    const m = menuOf(route);
+    document.querySelectorAll('#menu > *').forEach(el => el.classList.toggle('on', !!m && el.dataset.drop === m.key));
   }
 
   // ---------- charts ----------
@@ -363,8 +357,24 @@
   // ---------- shared blocks ----------
   const head = (crumb, title, lead) => `<div class="page-head rise"><div class="crumb">${crumb}</div><h1>${esc(title)}</h1>${lead ? `<p class="lead">${esc(lead)}</p>` : ''}</div>`;
   const paras = list => (list || []).map(p => `<p>${esc(p)}</p>`).join('');
+  // What exactly is asked, from the lane's open sponsor request: numbered or bulleted lines become a list.
+  function waitingDetail(text) {
+    const lines = String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return '';
+    let html = '', list = [], tag = 'ol';
+    const flush = () => { if (list.length) html += `<${tag}>${list.map(t => `<li>${esc(t)}</li>`).join('')}</${tag}>`; list = []; };
+    lines.forEach(l => {
+      const m = l.match(/^(\d+[.)]|[-•*])\s+(.+)$/);
+      if (!m) { flush(); html += `<p>${esc(l)}</p>`; return; }
+      if (!list.length) tag = /\d/.test(m[1]) ? 'ol' : 'ul';
+      list.push(m[2]);
+    });
+    flush();
+    return `<div class="need-detail">${html}</div>`;
+  }
   function needItem(w) {
-    return `<a class="need" href="#${slug(w.id)}"><span class="dot${w.blocked ? ' red' : ''}"></span><span><b>${esc(w.waiting)}</b><span>${esc([w.name, w.waitingWhen, w.blocked ? 'blocked ' + w.blocked + ' days' : ''].filter(Boolean).join(' · '))}</span></span><span class="go">Open &rsaquo;</span></a>`;
+    const href = '#' + slug(w.id);
+    return `<div class="need"><span class="dot${w.blocked ? ' red' : ''}"></span><div class="need-body"><a class="need-head" href="${href}"><b>${esc(w.waiting)}</b><span>${esc([w.name, w.waitingWhen, w.blocked ? 'blocked ' + w.blocked + ' days' : ''].filter(Boolean).join(' · '))}</span></a>${waitingDetail(w.waitingDetail)}</div><a class="go" href="${href}">Open &rsaquo;</a></div>`;
   }
   function wsCard(w, i) {
     const p = w.progress;
@@ -418,6 +428,8 @@
     const ws = workstreams();
     const needs = ws.filter(w => w.waiting && !w.closed);
     const prog = ws.filter(w => w.progress && w.progress.total).slice(0, 2);
+    const active = new Set(ws.filter(w => !w.closed).map(w => w.mission));
+    const idle = ['2', '4'].filter(m => !active.has(m));
     const hl = section('home', 'Headline').paras[0] || 'Building a private AI coach, one approved step at a time.';
     const intro = section('home', 'Intro').paras[0] || '';
     const parts = hl.split(/,\s*/);
@@ -440,20 +452,21 @@
         <div class="kpis">${kpis}</div>
       </div></section>
       <div class="wrap">
-        <div class="grid g3">
-          <div class="card rise"><h3>Waiting on Vince</h3><div class="sub">${needs.length ? 'These can’t move without you' : 'Nothing is waiting on you right now'}</div>${needs.map(needItem).join('')}</div>
+        <div class="card rise" id="sec-waiting"><h3>Waiting on Vince</h3><div class="sub">${needs.length ? 'These can’t move without you. Red means no update for three days or more.' : 'Nothing is waiting on you right now'}</div>${needs.map(needItem).join('')}</div>
+        <div class="grid g-pair">
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
         </div>
         <div class="grid g2">
-          <div class="card rise"><h3>Roadmap to launch</h3><div class="sub">Sponsor target windows, not forecasts · today marked</div><div class="chart" id="gantt" style="height:300px"></div></div>
-          <div class="card rise"><h3>Decisions per month</h3><div class="sub">${decCount} decisions recorded in the Registry</div><div class="chart" id="decBar" style="height:300px"></div></div>
+          <div class="card rise"><h3>Roadmap to launch</h3><div class="sub">Sponsor target windows, not forecasts · today marked · <a href="#roadmap">All milestones &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
+          <div class="card rise"><h3>Decisions per month</h3><div class="sub">${decCount} decisions recorded in the Registry · <a href="#decisions">All decisions &rsaquo;</a></div><div class="chart" id="decBar" style="height:300px"></div></div>
         </div>
-        <div class="sec-title">Workstreams</div>
-        <div class="ws-strip">${ws.map(wsCard).join('')}</div>
+        <div class="sec-title" id="sec-workstreams">Workstreams</div>
+        <div class="ws-strip">${ws.map(wsCard).join('')}${idle.map(m => `<div class="wsc" style="--c:${mColor(m)}"><span class="chip done">Not started</span><b>${esc(MISSION_NAME[m])}</b><div class="now">Mission ${m} · no active workstream</div></div>`).join('')}</div>
         <div class="grid g-half">
           <div class="card rise"><h3>Done this week</h3>${recent.length ? `<ul class="done-list">${recent.map(d => `<li><span class="d">${esc(fmt(d.dateD))}</span><span class="t">${esc(d.text)} <span class="sub">· ${esc(d.ws)}</span></span></li>`).join('')}</ul>` : '<p class="empty">Nothing recorded as finished in the last 7 days.</p>'}</div>
           <div class="card rise"><h3>Coming up</h3>${comingUp()}</div>
         </div>
+        <p class="sub">More: <a href="#trends">Progress trends</a> · <a href="#health">Data health</a></p>
       </div>`;
   }
   function afterHome(root) {
@@ -468,30 +481,14 @@
     return `<ul class="done-list">${up.map(m => `<li><span class="d">${esc(fmt(m.targetD))}</span><span>${esc(m.title)}<br><span class="sub">Target · ${m.forecastEarliest ? 'forecast ' + esc(fmt(parseDate(m.forecastEarliest))) : 'no forecast yet'}</span></span></li>`).join('')}</ul>`;
   }
 
-  function pageWaiting() {
-    const needs = workstreams().filter(w => w.waiting && !w.closed).sort((a, b) => b.blocked - a.blocked);
-    return head('Status &rsaquo; <b>Waiting on Vince</b>', 'Waiting on Vince', needs.length ? `${needs.length} item${needs.length > 1 ? 's' : ''} can't move until you act.` : 'Nothing is waiting on you right now.') +
-      `<div class="wrap"><div class="card rise">${needs.map(needItem).join('') || '<p class="empty">All clear.</p>'}</div>
-       <p class="sub">Red means the workstream has had no update for three days or more.</p></div>`;
-  }
-
-  function pageWorkstreams() {
-    const ws = workstreams();
-    const active = new Set(ws.filter(w => !w.closed).map(w => w.mission));
-    const idle = ['2', '4'].filter(m => !active.has(m));
-    return head('Status &rsaquo; <b>Workstreams</b>', 'Workstreams', 'Each workstream is one line of work with its own lead. Tap one for its detail.') +
-      `<div class="wrap"><div class="ws-strip">${ws.map(wsCard).join('')}</div>
-      ${idle.length ? `<div class="sec-title">Not started yet</div><div class="ws-strip">${idle.map(m => `<div class="wsc" style="--c:${mColor(m)}"><span class="chip done">Not started</span><b>${esc(MISSION_NAME[m])}</b><div class="now">Mission ${m} · no active workstream</div></div>`).join('')}</div>` : ''}</div>`;
-  }
-
   function pageWorkstream(id) {
     const w = workstreams().find(x => slug(x.id) === id);
     if (!w) return head('Status', 'Not found', 'That workstream is no longer in the Registry.');
     const p = w.progress;
     return `<div class="wrap">
-      <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="crumb"><a href="#workstreams">Workstreams</a> &rsaquo;</div><h1>${esc(w.name)}</h1>
+      <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="crumb"><a href="#workstreams">Status &rsaquo; Workstreams</a> &rsaquo;</div><h1>${esc(w.name)}</h1>
         <div>${chip(w.status)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
-      ${w.waiting && !w.closed ? `<div class="callout rise"><b>${esc(w.waiting)}</b><span class="sub">${esc(w.waitingWhen)}${w.blocked ? ' · blocked ' + w.blocked + ' days' : ''}</span></div>` : ''}
+      ${w.waiting && !w.closed ? `<div class="callout rise"><b>${esc(w.waiting)}</b><span class="sub">${esc(w.waitingWhen)}${w.blocked ? ' · blocked ' + w.blocked + ' days' : ''}</span>${waitingDetail(w.waitingDetail)}</div>` : ''}
       <div class="grid g-half">
         ${p && p.total ? `<div class="card rise"><h3>Progress</h3><div class="sub">${esc(p.measure)}</div><div class="chart" id="wsRing" style="height:230px"></div>
           <div class="sub">Checked ${esc(fmtLong(parseDate(p.checked)))}. Counts definition work, not testing or building.</div>${p.stale ? '<p class="warn">These counts are waiting for the automatic Jira refresh.</p>' : ''}</div>` : ''}
@@ -510,7 +507,7 @@
     const up = ms.filter(m => !/complete/i.test(m.status)).sort((a, b) => (a.targetD || 9e15) - (b.targetD || 9e15));
     const reached = ms.filter(m => /complete/i.test(m.status)).sort((a, b) => (b.actualD || b.targetD || 0) - (a.actualD || a.targetD || 0));
     const late = m => m.actualD && m.targetD && m.actualD - m.targetD > DAY ? ` <span class="chip stalled">${Math.round((m.actualD - m.targetD) / DAY)} days after target</span>` : '';
-    return head('Status &rsaquo; <b>Roadmap and milestones</b>', 'Roadmap and milestones', 'Target windows are the sponsor’s planning dates, not forecasts.') +
+    return head(crumb('roadmap', 'Roadmap and milestones'), 'Roadmap and milestones', 'Target windows are the sponsor’s planning dates, not forecasts.') +
       `<div class="wrap"><div class="card rise"><h3>Roadmap to launch</h3><div class="chart" id="gantt" style="height:320px"></div></div>
       <div class="grid g-half">
         <div class="card rise"><h3>Milestones ahead</h3><ul class="done-list">${up.map(m => `<li><span class="d">${esc(m.targetD ? fmt(m.targetD) : 'No date')}</span><span>${esc(m.title)}<br><span class="sub">${m.targetD ? 'Target ' + esc(fmtLong(m.targetD)) : 'No target yet'} · ${m.forecastEarliest ? 'forecast ' + esc(fmt(parseDate(m.forecastEarliest))) : 'no forecast yet'}</span></span></li>`).join('')}</ul></div>
@@ -520,7 +517,7 @@
 
   function pageDecisions() {
     const ds = decisions();
-    return head('Status &rsaquo; <b>Decisions</b>', 'Decisions', `${ds.length} decisions recorded since June, newest first.`) +
+    return head(crumb('decisions', 'Decisions'), 'Decisions', `${ds.length} decisions recorded since June, newest first.`) +
       `<div class="wrap"><div class="grid g-half">
         <div class="card rise"><h3>Decisions per month</h3><div class="chart" id="decBar" style="height:260px"></div></div>
         <div class="card rise"><h3>By mission</h3><div class="chart" id="decPie" style="height:260px"></div></div></div>
@@ -555,7 +552,7 @@
 
   function pageTrends() {
     const h = S.feed.history || [];
-    return head('Status &rsaquo; <b>Progress trends</b>', 'Progress trends', 'How coverage grows over time. A point is added each day the site reads the Registry.') +
+    return head(crumb('trends', 'Progress trends'), 'Progress trends', 'How coverage grows over time. A point is added each day the site reads the Registry.') +
       `<div class="wrap"><div class="card rise"><h3>Share fully complete</h3><div class="sub">${h.length} day${h.length === 1 ? '' : 's'} recorded so far</div><div class="chart" id="trend" style="height:320px"></div>
       ${h.length < 3 ? '<p class="sub">The lines fill in as days pass; the first points were recorded when the site launched.</p>' : ''}</div></div>`;
   }
@@ -584,7 +581,7 @@
       const d = parseDate(w.progress.checked);
       rows.push({ c: w.progress.stale ? css('--amber') : dot(d), b: w.name + ' counts', s: (d ? 'checked ' + fmtLong(d) : 'not checked') + (w.progress.stale ? ' · waiting for the automatic Jira refresh' : '') });
     });
-    return head('Status &rsaquo; <b>Data health</b>', 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
+    return head(crumb('health', 'Data health'), 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
       `<div class="wrap"><div class="card rise">${rows.map(r => `<div class="health-row"><span class="dot" style="background:${r.c}"></span><span><b>${esc(r.b)}</b><span>${esc(r.s)}</span></span></div>`).join('')}
       <div class="health-row" id="copyHealth"><span class="dot" style="background:${css('--steel')}"></span><span><b>Document copies and diagrams</b><span>Checking…</span></span></div></div></div>`;
   }
@@ -605,7 +602,7 @@
   function pageGoal() {
     const o = section('goal', 'Overall objective');
     const s = section('goal', 'Supporting objectives');
-    return head('How POA works &rsaquo; <b>The goal</b>', 'The goal', o.paras[0] || '') +
+    return head(crumb('goal', 'The goal'), 'The goal', o.paras[0] || '') +
       `<div class="wrap"><div class="obj-grid">${s.items.map((it, i) => `<div class="obj rise" style="--c:var(${OBJ_COLORS[i % 8]});animation-delay:${i * 40}ms"><div class="num">${i + 1}</div><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`).join('')}</div></div>`;
   }
 
@@ -614,7 +611,7 @@
     const five = section('missions', 'The five missions');
     const chosen = section('missions', 'How the missions were chosen');
     const mcol = label => { const m = (label.match(/Mission\s*(\d)/) || [])[1]; return label.includes('1A') ? css('--violet') : mColor(m); };
-    return head('How POA works &rsaquo; <b>Missions</b>', 'Missions', intro.paras[0] || '') +
+    return head(crumb('missions', 'Missions'), 'Missions', intro.paras[0] || '') +
       `<div class="wrap">
         <div class="mission-cards">${five.items.map((it, i) => `<div class="mcard rise" style="--c:${mcol(it.label)};animation-delay:${i * 40}ms"><b>${esc(it.label)}</b><span>${esc(it.text)}</span></div>`).join('')}</div>
         <div class="grid g2" style="align-items:start">
@@ -631,7 +628,7 @@
   function pageLifecycle() {
     const shows = section('lifecycle', 'What the diagram shows');
     const owners = section('lifecycle', 'Who owns each stage');
-    return head('How POA works &rsaquo; <b>Delivery lifecycle</b>', 'How POA delivers a capability', 'Every capability moves from scope to release through the same linked stages.') +
+    return head(crumb('lifecycle', 'Delivery lifecycle'), 'How POA delivers a capability', 'Every capability moves from scope to release through the same linked stages.') +
       `<div class="wrap">${diagramSlot('lifecycle')}
         <div class="grid g-half" style="align-items:start">
           <div class="card rise"><h3>What the diagram shows</h3><div class="prose" style="margin-top:8px">${paras(shows.paras)}</div></div>
@@ -643,7 +640,7 @@
     const shows = section('testing', 'What the diagram shows');
     const rules = section('testing', 'Rules we keep');
     const t = (S.feed.static && S.feed.static.testing1A) || null;
-    return head('How POA works &rsaquo; <b>Testing</b>', 'How we test', 'Each release is checked against what it claims to do, by someone other than the builder.') +
+    return head(crumb('testing', 'Testing overview'), 'How we test', 'Each release is checked against what it claims to do, by someone other than the builder.') +
       `<div class="wrap">${diagramSlot('testing')}
         <div class="grid g-half" style="align-items:start">
           <div class="card rise"><h3>What the diagram shows</h3><div class="prose" style="margin-top:8px">${paras(shows.paras)}</div></div>
@@ -681,7 +678,7 @@
     const intro = section('architecture', 'Intro');
     const fit = section('architecture', 'How the pieces fit together');
     const check = section('architecture', 'How a new entry is checked');
-    return head('How POA works &rsaquo; <b>Architecture</b>', 'Architecture', intro.paras[0] || '') +
+    return head(crumb('architecture', 'Architecture'), 'Architecture', intro.paras[0] || '') +
       `<div class="wrap">
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('architecture')}</div><div class="card rise"><h3>${esc(fit.title || 'How the pieces fit together')}</h3><div class="prose" style="margin-top:8px">${paras(fit.paras)}</div></div></div>
         <div class="grid g2" style="align-items:start"><div>${diagramSlot('capture')}</div><div class="card rise"><h3>${esc(check.title || 'How a new entry is checked')}</h3><div class="prose" style="margin-top:8px">${paras(check.paras)}</div></div></div>
@@ -764,7 +761,7 @@
   }
 
   function pageDoc(route) {
-    return head('Project views &rsaquo; <b>Document</b>', 'Opening the document…', '') + `<div class="wrap" id="docPage"></div>`;
+    return head(crumb(route, 'Document'), 'Opening the document…', '') + `<div class="wrap" id="docPage"></div>`;
   }
   async function afterDoc(root, route) {
     const d = await getCopy(route.slice(4));
@@ -807,7 +804,7 @@
   function pageTeam() {
     const who = section('team', 'Who does what');
     const agree = section('team', 'The working agreement');
-    return head('How POA works &rsaquo; <b>Team and operating model</b>', 'Team and operating model', 'Vince decides. AI agents deliver, each in a named role, and each keeps its own records current.') +
+    return head(crumb('team', 'Team and operating model'), 'Team and operating model', 'Vince decides. AI agents deliver, each in a named role, and each keeps its own records current.') +
       `<div class="wrap"><div class="roles">${who.items.map((it, i) => {
         const m = it.label.match(/^(.+?)\s*\((.+)\)$/);
         return `<div class="role rise" style="animation-delay:${i * 40}ms"><span class="k">${esc(m ? m[2] : '')}</span><b>${esc(m ? m[1] : it.label)}</b><span>${esc(it.text)}</span></div>`;
@@ -818,7 +815,7 @@
 
   function pageGovernance() {
     const gs = S.feed.governance || [];
-    return head('How POA works &rsaquo; <b>Governance documents</b>', 'Governance documents', 'The documents that govern the project, with their approved summaries.') +
+    return head(crumb('governance', 'Governance documents'), 'Governance documents', 'The documents that govern the project, with their approved summaries.') +
       `<div class="wrap">${gs.map((g, i) => `<div class="card rise" style="animation-delay:${i * 40}ms"><h3>${esc(g.title)}</h3><div class="sub">${govNote(g)}</div>
         ${g.takeaways.length ? `<div class="take" style="margin-top:12px">${g.takeaways.map((t, j) => `<div><i>${j + 1}</i>${esc(t)}</div>`).join('')}</div>` : ''}
         <details class="more" style="margin-top:12px"><summary>Read the approved summary</summary><div class="prose">${String(g.summary || '').split(/\n+/).filter(Boolean).map(l => (l.length < 70 && !/[.:;]$/.test(l)) ? `<h4>${esc(l)}</h4>` : `<p>${esc(l)}</p>`).join('')}</div></details></div>`).join('')}</div>`;
@@ -830,19 +827,24 @@
   }
 
   const ROUTES = {
-    home: [pageHome, afterHome, 'Home'], waiting: [pageWaiting, null, 'Waiting on Vince'], workstreams: [pageWorkstreams, null, 'Workstreams'],
+    home: [pageHome, afterHome, 'Status'],
     roadmap: [pageRoadmap, root => gantt($('#gantt', root), window.innerWidth < 700), 'Roadmap'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
     architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],
   };
 
+  // The waiting and workstreams lists live on the Status page; their old addresses open it at that section.
+  const SECTIONS = { status: '', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
+
   function render() {
-    const route = (location.hash || '#home').slice(1) || 'home';
+    let route = (location.hash || '#home').slice(1) || 'home';
+    const target = SECTIONS[route];
+    if (target != null) route = 'home';
     disposeCharts();
     closeDrop();
     const view = $('#view');
-    let title = 'Home';
+    let title = 'Status';
     try {
       if (route.startsWith('ws-')) {
         view.innerHTML = pageWorkstream(route);
@@ -862,9 +864,11 @@
       fillDiagrams(view);
       countUp(view);
     } catch (e) {
-      view.innerHTML = `<div class="wrap"><div class="card">Something went wrong showing this page. <a href="#home">Back to Home</a></div></div>`;
+      view.innerHTML = `<div class="wrap"><div class="card">Something went wrong showing this page. <a href="#home">Back to Status</a></div></div>`;
       console.error(e);
     }
+    // After the hashchange handler's scroll to the top.
+    if (target) setTimeout(() => { const el = document.getElementById(target); if (el) el.scrollIntoView({ block: 'start' }); }, 0);
     document.title = title + ' · POA';
     markMenu(route);
     const needs = workstreams().filter(w => w.waiting && !w.closed).length;
