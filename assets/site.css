@@ -216,6 +216,11 @@ details.more .prose { margin-top: 12px; }
 .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 .warn { color: var(--amber); font-size: 13px; font-weight: 700; margin-top: 8px; }
+.sched-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.sched-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sched-legend i { display: inline-block; width: 16px; height: 8px; border-radius: 99px; }
+.sched-legend i.pl { background: transparent; border: 1.5px dashed var(--muted); }
+.sched-legend i.late { background: transparent; border: 2px solid var(--rose); }
 .ws-head { border-radius: var(--r); padding: 20px; background: linear-gradient(135deg, color-mix(in srgb, var(--c) 24%, var(--panel)), var(--panel)); border: 1px solid var(--line); }
 .ws-head h1 { margin: 6px 0 4px; font-size: clamp(26px, 4vw, 34px); }
 

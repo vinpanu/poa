@@ -158,6 +158,28 @@
   const governance = key => (S.feed.governance || []).find(g => g.key === key);
   const milestones = () => (S.feed.milestones || []).map(m => ({ ...m, targetD: parseDate(m.target), actualD: parseDate(m.actual), startD: parseDate(m.planStart) }));
   const decisions = () => (S.feed.decisions || []).map(d => ({ ...d, dateD: parseDate(d.date) })).filter(d => d.dateD).sort((a, b) => b.dateD - a.dateD);
+  // The program schedule (Registry Schedule tab): one row per stage, release or milestone, grouped by mission
+  // or increment in delivery order. A stage past its finish date that isn't complete is late.
+  const SCHED_COLOR = { '0': '--steel', '1A': '--violet', '1B': '--purple', '2': '--green', '3': '--sky', '4': '--orange', all: '--teal' };
+  const SCHED_LEGEND = [['0', 'Planning and scope'], ['1A', 'Reasoning engine (1A)'], ['1B', 'Coaching knowledge (1B)'], ['2', 'Athlete model'], ['3', 'Data capture'], ['4', 'Daily running'], ['all', 'Releases']];
+  const sColor = k => css(SCHED_COLOR[k] || '--teal');
+  const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+  const schedule = () => ((S.feed.schedule && S.feed.schedule.rows) || []).map(r => ({ ...r, startD: parseDate(r.start), finishD: parseDate(r.finish), done: /complete/i.test(r.status) }));
+  const isLate = r => !r.done && !!r.finishD && r.finishD < startOfToday();
+  // Coaching questions newly fully answered this week (since Monday), from the daily counts, against
+  // Vince's weekly minimum (2026-11-01).
+  function coachingWeek() {
+    const min = S.feed.static && S.feed.static.coachingWeeklyMin;
+    const w = workstreams().find(x => x.progress && /question/i.test(x.progress.measure || ''));
+    const h = (S.feed.history || []).filter(p => w && p[w.id]);
+    if (!min || !w || !h.length) return null;
+    const now = new Date();
+    const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    const key = mon.getFullYear() + '-' + String(mon.getMonth() + 1).padStart(2, '0') + '-' + String(mon.getDate()).padStart(2, '0');
+    const before = h.filter(p => p.date < key);
+    const base = (before.length ? before[before.length - 1] : h[0])[w.id].c;
+    return { done: Math.max(0, w.progress.complete - base), min };
+  }
   const pColor = w => { const m = (w.progress && w.progress.measure) || ''; return /scope/i.test(m) ? css('--teal') : /question/i.test(m) ? css('--purple') : mColor(w.mission); };
   const measureLabel = m => /scope/i.test(m) ? 'product capabilities fully defined' : /question/i.test(m) ? 'coaching questions fully answered' : String(m || '').toLowerCase();
 
@@ -167,7 +189,7 @@
   const MENU = [
     { key: 'status', label: 'Status', items: [
       { href: '#home', label: 'Status overview', sub: 'Waiting on you, progress and what’s next', ico: '&#8962;', c: '--teal' },
-      { href: '#roadmap', label: 'Roadmap and milestones', sub: 'Target windows to launch', ico: '&#9719;', c: '--sky' },
+      { href: '#roadmap', label: 'Schedule and milestones', sub: 'Every stage from June to launch', ico: '&#9719;', c: '--sky' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
       { href: '#trends', label: 'Progress trends', sub: 'Coverage over time', ico: '&#9650;', c: '--green' },
       { href: '#health', label: 'Data health', sub: 'When each source last refreshed', ico: '&#9881;', c: '--orange' },
@@ -322,6 +344,120 @@
     });
   }
 
+  // A schedule chart: one category per line (cats), bars solid up to today and lighter after (a done bar is
+  // solid throughout, a late one ringed in rose), thin bars for milestone forecast windows, and diamonds:
+  // solid for a forecast or actual date, hollow for a target.
+  function drawGantt(el, cats, bars, marks, compact, axisTop) {
+    const muted = css('--muted'), ink = css('--ink'), ink2 = css('--ink-2'), grid = css('--chart-grid'), amber = css('--amber'), rose = css('--rose'), panel = css('--panel');
+    el.style.height = (cats.length * (compact ? 19 : 23) + 64) + 'px';
+    const today = startOfToday();
+    const times = bars.flatMap(b => [+b.start, +b.end]).concat(marks.map(m => +m.date));
+    const min = new Date(Math.min(...times) - 14 * DAY), max = new Date(Math.max(...times) + 21 * DAY);
+    const cut = compact ? 19 : 40;
+    const lab = s => { s = String(s).replace(/[{}|]/g, ''); return s.length > cut ? s.slice(0, cut - 1) + '…' : s; };
+    const diamonds = (kind, style) => ({ type: 'scatter', symbol: 'diamond', symbolSize: compact ? 10 : 13, z: kind === 'f' ? 5 : 4, encode: { x: 0, y: 1 }, itemStyle: style,
+      data: marks.filter(m => m.kind === kind).map(m => ({ value: [m.date, m.y], tip: m.tip, itemStyle: m.color ? Object.assign({}, style, { color: m.color }) : style })) });
+    chart(el, {
+      grid: { left: compact ? 118 : 252, right: 18, top: axisTop ? 28 : 12, bottom: 28 },
+      tooltip: { trigger: 'item', confine: true, formatter: p => p.seriesType === 'custom' ? bars[p.dataIndex].tip : (p.data && p.data.tip) || '' },
+      xAxis: { type: 'time', min, max, position: axisTop ? 'top' : 'bottom', axisLabel: { color: muted, fontSize: compact ? 10 : 11, formatter: v => new Date(v).toLocaleDateString('en-US', { month: 'short' }) },
+        splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: grid } } },
+      yAxis: { type: 'category', data: cats.map(c => c.label), inverse: true, axisTick: { show: false }, axisLine: { show: false },
+        axisLabel: { interval: 0, formatter: (v, i) => (cats[i] && cats[i].head ? '{h|' : '{t|') + lab(v) + '}',
+          rich: { h: { color: ink, fontWeight: 800, fontSize: compact ? 10.5 : 12 }, t: { color: ink2, fontSize: compact ? 9.5 : 11 } } } },
+      series: [{
+        type: 'custom',
+        renderItem: (params, api) => {
+          const b = bars[params.dataIndex];
+          const s = api.coord([b.start, b.y]), e = api.coord([b.end, b.y]);
+          const h = b.thin ? 3 : Math.max(6, api.size([0, 1])[1] * 0.56), y0 = s[1] - h / 2, r = h / 2;
+          const x = s[0], w = Math.max(b.thin ? 2 : 5, e[0] - s[0]);
+          const t = Math.min(Math.max(api.coord([today, b.y])[0], x), x + w);
+          const kids = [];
+          if (b.thin) kids.push({ type: 'rect', shape: { x, y: y0, width: w, height: h }, style: { fill: b.color + '99' } });
+          else if (b.done || t >= x + w) kids.push({ type: 'rect', shape: { x, y: y0, width: w, height: h, r }, style: { fill: b.color } });
+          else if (t <= x) kids.push({ type: 'rect', shape: { x, y: y0, width: w, height: h, r }, style: { fill: b.color + '4D', stroke: b.color, lineWidth: 1, lineDash: [3, 3] } });
+          else {
+            kids.push({ type: 'rect', shape: { x, y: y0, width: t - x, height: h, r: [r, 0, 0, r] }, style: { fill: b.color } });
+            kids.push({ type: 'rect', shape: { x: t, y: y0, width: x + w - t, height: h, r: [0, r, r, 0] }, style: { fill: b.color + '4D', stroke: b.color, lineWidth: 1, lineDash: [3, 3] } });
+          }
+          if (b.late) kids.push({ type: 'rect', shape: { x: x - 2, y: y0 - 2, width: w + 4, height: h + 4, r: r + 2 }, style: { fill: 'none', stroke: rose, lineWidth: 2 } });
+          return { type: 'group', children: kids };
+        },
+        encode: { x: [1, 2], y: 0 },
+        data: bars.map(b => [b.y, b.start, b.end]),
+        markLine: { symbol: 'none', silent: true, label: { position: axisTop ? 'end' : 'start', formatter: 'Today', color: amber, fontWeight: 800, fontSize: 11 },
+          lineStyle: { color: amber, width: 2, type: 'solid' }, data: [{ xAxis: today }] },
+      }, diamonds('f', { color: ink, borderColor: panel, borderWidth: 1 }), diamonds('t', { color: 'rgba(0,0,0,0)', borderColor: muted, borderWidth: 1.5 })],
+    });
+  }
+
+  // The whole schedule, a line per stage under its group's heading.
+  function scheduleChart(el, compact) {
+    const rows = schedule();
+    if (!rows.some(r => r.startD)) { el.style.height = '320px'; return gantt(el, compact); }
+    const ms = new Map(milestones().map(m => [m.id, m]));
+    const cats = [], bars = [], marks = [];
+    // Under its heading a line drops a prefix the heading already says: "Food: build" under Food logging reads "Build".
+    const short = (item, grp) => {
+      const m = item.match(/^([^:]{1,40}):\s+(.+)$/);
+      const p = m && m[1].toLowerCase(), g = grp.toLowerCase();
+      return m && (g.includes(p) || g.includes(p.replace(/s$/, ''))) ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : item;
+    };
+    let group = null;
+    rows.forEach(r => {
+      if (r.group !== group) { group = r.group; cats.push({ label: r.group, head: true }); }
+      cats.push({ label: short(r.item, r.group), head: false });
+      const y = cats.length - 1, color = sColor(r.mission), late = isLate(r);
+      const m = r.milestone && ms.get(r.milestone), tgt = m && m.targetD;
+      const tgtTip = tgt ? '<br>Target ' + fmtLong(tgt) : '';
+      if (r.milestone) {
+        if (r.done && r.finishD) marks.push({ y, date: r.finishD, kind: 'f', color, tip: `${esc(r.item)}<br>Done ${fmtLong(r.finishD)}${tgtTip}` });
+        else if (r.startD) {
+          const span = r.finishD && r.finishD - r.startD > DAY;
+          const tip = `${esc(r.item)}<br>Forecast ${span ? fmt(r.startD) + ' to ' + fmtLong(r.finishD) : fmtLong(r.startD)}${tgtTip}${late ? '<br><b>Late</b>' : ''}`;
+          if (span) bars.push({ y, start: r.startD, end: r.finishD, color, thin: true, late, tip });
+          marks.push({ y, date: r.startD, kind: 'f', color, tip });
+          if (span) marks.push({ y, date: r.finishD, kind: 'f', color, tip });
+        }
+        if (tgt && !(r.done && r.finishD && Math.abs(tgt - r.finishD) <= DAY)) marks.push({ y, date: tgt, kind: 't', tip: `${esc(r.item)}<br>Target ${fmtLong(tgt)}` });
+      } else if (r.startD && r.finishD) {
+        bars.push({ y, start: r.startD, end: new Date(+r.finishD + DAY), color, done: r.done, late,
+          tip: `${esc(r.item)}<br>${fmt(r.startD)} to ${fmtLong(r.finishD)} · ${esc([r.stage, r.status].filter(Boolean).join(', '))}${late ? '<br><b>Late</b>' : ''}` });
+      }
+    });
+    drawGantt(el, cats, bars, marks, compact, true);
+  }
+
+  // One bar per group for the Status page, from its first start to its last finish, with the launch window.
+  function scheduleOverview(el, compact) {
+    const rows = schedule().filter(r => r.startD && r.finishD);
+    if (!rows.length) { el.style.height = '300px'; return gantt(el, compact); }
+    const groups = [];
+    rows.forEach(r => {
+      let g = groups.find(x => x.label === r.group);
+      if (!g) { g = { label: r.group, head: true, start: r.startD, end: r.finishD, n: {}, done: true, late: false }; groups.push(g); }
+      if (r.startD < g.start) g.start = r.startD;
+      if (r.finishD > g.end) g.end = r.finishD;
+      if (!r.milestone) g.n[r.mission] = (g.n[r.mission] || 0) + 1;
+      if (!r.done) g.done = false;
+      if (isLate(r)) g.late = true;
+    });
+    const bars = groups.map((g, y) => ({ y, start: g.start, end: new Date(+g.end + DAY), done: g.done, late: g.late,
+      color: sColor(Object.keys(g.n).sort((a, b) => g.n[b] - g.n[a])[0] || 'all'),
+      tip: `${esc(g.label)}<br>${fmt(g.start)} to ${fmtLong(g.end)}${g.done ? ' · done' : ''}${g.late ? '<br><b>Something here is late</b>' : ''}` }));
+    const marks = [];
+    const launch = rows.find(r => r.milestone && /launch/i.test(r.item));
+    const y = launch ? groups.findIndex(g => g.label === launch.group) : -1;
+    if (y >= 0) {
+      const m = milestones().find(x => x.id === launch.milestone);
+      marks.push({ y, date: launch.startD, kind: 'f', color: css('--amber'), tip: `Launch forecast ${fmt(launch.startD)} to ${fmtLong(launch.finishD)}` });
+      if (m && m.targetD) marks.push({ y, date: m.targetD, kind: 't', tip: 'Launch target ' + fmtLong(m.targetD) });
+    }
+    drawGantt(el, groups, bars, marks, compact, false);
+  }
+  const schedLegend = () => `<div class="sched-legend">${SCHED_LEGEND.map(([k, t]) => `<span><i style="background:${sColor(k)}"></i>${esc(t)}</span>`).join('')}<span><i class="pl"></i>Planned</span><span><i class="late"></i>Late</span><span>&#9670; forecast or actual &middot; &#9671; target</span></div>`;
+
   function decisionsByMonth() {
     const counts = new Map();
     decisions().slice().reverse().forEach(d => {
@@ -437,10 +573,12 @@
     const launch = roadmapRows().launch;
     const days = launch ? Math.max(0, Math.ceil((launch.targetD - Date.now()) / DAY)) : null;
     const decCount = (S.feed.decisions || []).length;
+    const wk = coachingWeek();
     const kpi = (v, small, label, w, grad) => `<div class="kpi rise"><div class="v"><span data-count="${v}">${v}</span>${small ? `<small>${small}</small>` : ''}</div><div class="l">${esc(label)}</div>${w ? `<div class="spark"><i data-w="${w}" style="width:0;background:${grad}"></i></div>` : ''}</div>`;
     const kpis = prog.map((w, i) => kpi(w.progress.complete, '/' + w.progress.total, measureLabel(w.progress.measure), (w.progress.complete / w.progress.total * 100).toFixed(1) + '%',
       /question/i.test(w.progress.measure) ? `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})` : `linear-gradient(90deg, ${css('--teal')}, ${css('--sky')})`)).join('') +
-      kpi(decCount, '', 'decisions recorded', '100%', `linear-gradient(90deg, ${css('--sky')}, ${css('--violet')})`) +
+      (wk ? kpi(wk.done, '/' + wk.min, 'coaching questions this week, your minimum ' + wk.min, Math.min(100, wk.done / wk.min * 100).toFixed(1) + '%', `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})`)
+        : kpi(decCount, '', 'decisions recorded', '100%', `linear-gradient(90deg, ${css('--sky')}, ${css('--violet')})`)) +
       (days != null ? kpi(days, ' days', 'to the ' + fmtLong(launch.targetD) + ' launch target', '', '') : '');
     const recent = ws.flatMap(w => (w.done || []).map(d => ({ ...d, dateD: parseDate(d.date), ws: w.name })))
       .filter(d => d.dateD && daysSince(d.dateD) <= 7).sort((a, b) => b.dateD - a.dateD).slice(0, 6);
@@ -457,7 +595,7 @@
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
         </div>
         <div class="grid g2">
-          <div class="card rise"><h3>Roadmap to launch</h3><div class="sub">Sponsor target windows, not forecasts · today marked · <a href="#roadmap">All milestones &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
+          <div class="card rise"><h3>Schedule to launch</h3><div class="sub">Each area from its first stage to its last · solid up to today · <a href="#roadmap">Full schedule &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
           <div class="card rise"><h3>Decisions per month</h3><div class="sub">${decCount} decisions recorded in the Registry · <a href="#decisions">All decisions &rsaquo;</a></div><div class="chart" id="decBar" style="height:300px"></div></div>
         </div>
         <div class="sec-title" id="sec-workstreams">Workstreams</div>
@@ -472,7 +610,7 @@
   function afterHome(root) {
     const ws = workstreams().filter(w => w.progress && w.progress.total).slice(0, 2);
     root.querySelectorAll('[data-ring]').forEach(el => { const w = ws[+el.dataset.ring]; ring(el, w.progress, pColor(w), window.innerWidth < 560); });
-    gantt($('#gantt', root), window.innerWidth < 700);
+    scheduleOverview($('#gantt', root), window.innerWidth < 700);
     decisionBars($('#decBar', root));
   }
   function comingUp() {
@@ -507,8 +645,19 @@
     const up = ms.filter(m => !/complete/i.test(m.status)).sort((a, b) => (a.targetD || 9e15) - (b.targetD || 9e15));
     const reached = ms.filter(m => /complete/i.test(m.status)).sort((a, b) => (b.actualD || b.targetD || 0) - (a.actualD || a.targetD || 0));
     const late = m => m.actualD && m.targetD && m.actualD - m.targetD > DAY ? ` <span class="chip stalled">${Math.round((m.actualD - m.targetD) / DAY)} days after target</span>` : '';
-    return head(crumb('roadmap', 'Roadmap and milestones'), 'Roadmap and milestones', 'Target windows are the sponsor’s planning dates, not forecasts.') +
-      `<div class="wrap"><div class="card rise"><h3>Roadmap to launch</h3><div class="chart" id="gantt" style="height:320px"></div></div>
+    const rows = schedule();
+    const reviewed = parseDate(S.feed.schedule && S.feed.schedule.reviewed);
+    const behind = rows.filter(isLate);
+    const wk = coachingWeek();
+    const lead = rows.length ? 'Every stage from June 2026 to launch. Past dates are estimates; future dates are forecasts' + (reviewed ? ', last reviewed ' + fmtLong(reviewed) : '') + '.'
+      : 'Target windows are the sponsor’s planning dates, not forecasts.';
+    return head(crumb('roadmap', 'Schedule and milestones'), 'Schedule and milestones', lead) +
+      `<div class="wrap">
+      ${rows.length ? `<div class="grid g-half">
+        <div class="card rise"><h3>Behind schedule</h3>${behind.length ? `<ul class="done-list">${behind.map(r => `<li><span class="d">${esc(fmt(r.finishD))}</span><span>${esc(r.item)}<br><span class="sub">${esc(r.group)} · due ${esc(fmtLong(r.finishD))}</span></span></li>`).join('')}</ul>` : '<p class="empty">Nothing is past its finish date.</p>'}</div>
+        <div class="card rise"><h3>Coaching questions this week</h3>${wk ? `<div class="big-num">${wk.done}<small> of ${wk.min} since Monday</small></div><div class="bar"><i style="width:${Math.min(100, wk.done / wk.min * 100).toFixed(1)}%;background:${css('--purple')}"></i></div><div class="sub">Main questions fully answered, counted from Jira each day; ${wk.min} a week is your minimum.</div>` : '<p class="empty">Not counted yet.</p>'}</div>
+      </div>` : ''}
+      <div class="card rise"><h3>Schedule</h3><div class="sub">${rows.length ? 'Bars are stages, solid up to today and lighter after. Tap a bar for its dates.' : 'Sponsor target windows'}</div><div class="chart" id="sched"></div>${rows.length ? schedLegend() : ''}</div>
       <div class="grid g-half">
         <div class="card rise"><h3>Milestones ahead</h3><ul class="done-list">${up.map(m => `<li><span class="d">${esc(m.targetD ? fmt(m.targetD) : 'No date')}</span><span>${esc(m.title)}<br><span class="sub">${m.targetD ? 'Target ' + esc(fmtLong(m.targetD)) : 'No target yet'} · ${m.forecastEarliest ? 'forecast ' + esc(fmt(parseDate(m.forecastEarliest))) : 'no forecast yet'}</span></span></li>`).join('')}</ul></div>
         <div class="card rise"><h3>Milestones reached</h3><ul class="done-list">${reached.map(m => `<li><span class="d">${esc(fmt(m.actualD || m.targetD))}</span><span class="t">${esc(m.title)}${late(m)}</span></li>`).join('')}</ul></div>
@@ -828,7 +977,7 @@
 
   const ROUTES = {
     home: [pageHome, afterHome, 'Status'],
-    roadmap: [pageRoadmap, root => gantt($('#gantt', root), window.innerWidth < 700), 'Roadmap'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
+    roadmap: [pageRoadmap, root => scheduleChart($('#sched', root), window.innerWidth < 700), 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
     architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],
