@@ -16,7 +16,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # The branch's latest commit, not the one that triggered the run: runs wait for each other
+      # (concurrency), so a queued run then starts from the data the previous run just published.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@v5
         with:
           node-version: 22
