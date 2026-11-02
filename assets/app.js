@@ -16,6 +16,8 @@
   };
   const fmt = (d, o) => d ? d.toLocaleDateString('en-US', o || { month: 'short', day: 'numeric' }) : '';
   const fmtLong = d => fmt(d, { month: 'long', day: 'numeric', year: 'numeric' });
+  // A short date, with its year when it isn't this year's.
+  const fmtD = d => d && d.getFullYear() !== new Date().getFullYear() ? fmt(d, { month: 'short', day: 'numeric', year: 'numeric' }) : fmt(d);
   const fmtTime = d => d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
   const daysSince = d => d ? Math.floor((Date.now() - d.getTime()) / DAY) : null;
   const ago = d => {
@@ -143,15 +145,19 @@
   const MISSION_COLOR = { '0': '--steel', '1': '--purple', '2': '--green', '3': '--sky', '4': '--orange', all: '--amber' };
   const MISSION_NAME = { '0': 'Planning and governance', '1': 'Coaching foundations', '2': 'Athlete model', '3': 'Data capture', '4': 'Daily running', all: 'Whole program' };
   const mColor = m => css(MISSION_COLOR[m] || '--teal');
+  // A lane's chip says whether its stages are on schedule (Vince, 2026-11-02); what waits on Vince shows
+  // beside it. A lane the schedule doesn't cover shows no schedule status.
   const workstreams = () => (S.feed.workstreams || []).map(w => {
     const updated = parseDate(w.updated);
     const closed = /closed|complete/i.test(w.status || '');
     const stalledDays = daysSince(updated);
-    const status = closed ? 'done' : w.waiting ? 'needs' : (stalledDays >= 3 ? 'stalled' : 'track');
-    return { ...w, name: w.name || w.id, updatedDate: updated, closed, status, blocked: !closed && stalledDays >= 3 ? stalledDays : 0 };
+    const sched = closed ? null : laneState(w.id);
+    const status = closed ? 'done' : sched ? sched.s : 'none';
+    return { ...w, name: w.name || w.id, updatedDate: updated, closed, status, sched, blocked: !closed && stalledDays >= 3 ? stalledDays : 0 };
   });
-  const STATUS_LABEL = { needs: 'Needs you', stalled: 'Stalled', track: 'On track', done: 'Done' };
+  const STATUS_LABEL = { done: 'Done', track: 'On track', risk: 'At risk', behind: 'Behind', none: 'No schedule' };
   const chip = st => `<span class="chip ${st}">${STATUS_LABEL[st]}</span>`;
+  const needsChip = w => w.waiting && !w.closed ? '<span class="chip needs">Needs you</span>' : '';
   const slug = id => 'ws-' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const content = page => (S.feed.content && S.feed.content[page]) || [];
   const section = (page, title) => content(page).find(s => s.title.toLowerCase() === title.toLowerCase()) || { title: '', paras: [], items: [] };
@@ -166,11 +172,129 @@
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   const schedule = () => ((S.feed.schedule && S.feed.schedule.rows) || []).map(r => ({ ...r, startD: parseDate(r.start), finishD: parseDate(r.finish), done: /complete/i.test(r.status) }));
   const isLate = r => !r.done && !!r.finishD && r.finishD < startOfToday();
+  // Under its group's heading a stage drops a prefix the heading already says: "Food: build" reads "Build".
+  const shortItem = (item, grp) => {
+    const m = String(item).match(/^([^:]{1,40}):\s+(.+)$/);
+    const p = m && m[1].toLowerCase(), g = String(grp).toLowerCase();
+    return m && (g.includes(p) || g.includes(p.replace(/s$/, ''))) ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : item;
+  };
+  // The lane whose progress counts the coaching questions (the raw feed, so the schedule status can use it).
+  const questionLane = () => (S.feed.workstreams || []).find(x => x.progress && /question/i.test(x.progress.measure || ''));
+
+  // ---------- schedule status ----------
+  // Each stage, area and lane is Done, On track, At risk or Behind (Vince, 2026-11-02). Behind: a stage is
+  // past its finish date. At risk: a stage should have started and hasn't; or it is underway and due within
+  // a week with its Jira records still open; or the coaching questions' pace won't finish capture by its
+  // date. On track means on schedule, nothing else.
+  const SOON = 7;
+  const SEVERITY = { done: 0, track: 1, risk: 2, behind: 3 };
+  const STATE_COLOR = { done: '--steel', track: '--green', risk: '--orange', behind: '--rose' };
+  // A schedule group, a build area (an epic) and a requirement area match by name, so "Shared foundation
+  // (Missions 2–4)", "Shared foundation: database, …" and "Logging foundation requirements" are one area.
+  const AREA_ALIAS = { 'logging foundation': 'shared foundation' };
+  const areaKey = s => {
+    const k = String(s || '').toLowerCase().replace(/\s*\([^)]*\)/g, '').split(':')[0].replace(/\s+requirements$/, '').trim();
+    return AREA_ALIAS[k] || k;
+  };
+  const board = () => (S.feed.build && S.feed.build.status === 'ok' && S.feed.build) || null;
+  const reqs = () => (S.feed.requirements && S.feed.requirements.status === 'ok' && S.feed.requirements) || null;
+  const buildArea = group => { const b = board(); return (b && (b.areas || []).find(a => areaKey(a.name) === areaKey(group))) || null; };
+  const reqArea = group => { const r = reqs(); return (r && (r.areas || []).find(a => areaKey(a.name) === areaKey(group))) || null; };
+  const releaseNo = s => (String(s || '').match(/^Capture release (\d+)/i) || [])[1];
+  const releaseCards = n => { const b = board(); return b ? (b.areas || []).flatMap(a => a.cards || []).filter(c => (c.releases || []).some(x => releaseNo(x) === n)) : []; };
+  const isTrial = c => /trial|acceptance/i.test(c.name);
+  const isOpen = c => c.cat !== 'done';
+  // A card that changed status the day the board was set up started there at its real status, so it
+  // isn't recently done.
+  const movedRecently = c => { const d = parseDate(c.changed), since = parseDate(S.feed.static && S.feed.static.buildBoardSince); return d && daysSince(d) <= SOON && !(since && d <= since); };
+  // The Jira records behind a stage: requirement records for a requirements stage, the area's build cards
+  // for a build stage (trial cards for a test stage), and every card in a release for a release.
+  function stageRecords(r) {
+    if (/^requirements$/i.test(r.stage)) { const a = reqArea(r.group); return a ? { list: a.records || [], what: 'requirements still to approve' } : null; }
+    if (/^release$/i.test(r.stage)) { const n = releaseNo(r.item); return n && board() ? { list: releaseCards(n), what: 'cards still open' } : null; }
+    if (/^(build|test)$/i.test(r.stage)) {
+      const a = buildArea(r.group);
+      if (!a) return null;
+      const cards = a.cards || [], trials = cards.filter(isTrial);
+      return { list: /^test$/i.test(r.stage) ? (trials.length ? trials : cards) : cards.filter(c => !isTrial(c)), what: 'cards still open' };
+    }
+    return null;
+  }
+  function rowState(r) {
+    if (r.done) return { s: 'done', why: [] };
+    if (isLate(r)) return { s: 'behind', why: [`${r.item}: due ${fmtD(r.finishD)}`] };
+    const today = startOfToday(), why = [];
+    if (!r.milestone && /planned/i.test(r.status) && r.startD && r.startD < today) why.push(`${r.item}: was due to start ${fmtD(r.startD)}`);
+    if (r.finishD && r.finishD - today <= SOON * DAY && (!r.startD || r.startD <= today)) {
+      const rec = stageRecords(r);
+      const n = rec ? rec.list.filter(isOpen).length : 0;
+      if (n) why.push(`${r.item}: due ${fmtD(r.finishD)} with ${n} ${rec.what}`);
+    }
+    const p = /coaching knowledge capture/i.test(r.item) ? pace() : null;
+    if (p && p.behind) why.push(`${r.item}: ${p.text}`);
+    return { s: why.length ? 'risk' : 'track', why };
+  }
+  // The worst state among the rows; Done only when every row is done.
+  function rowsState(rows) {
+    if (!rows.length) return null;
+    const st = rows.map(rowState);
+    return { s: st.reduce((m, x) => SEVERITY[x.s] > SEVERITY[m] ? x.s : m, 'done'), why: st.flatMap(x => x.why) };
+  }
+  // The schedule's groups (missions and increments), in delivery order, with their state and Jira records.
+  function areas() {
+    const groups = [];
+    schedule().forEach(r => { let g = groups.find(x => x.name === r.group); if (!g) groups.push(g = { name: r.group, rows: [] }); g.rows.push(r); });
+    return groups.map(g => ({ ...g, ...rowsState(g.rows), cards: (buildArea(g.name) || {}).cards || null, req: reqArea(g.name) }));
+  }
+  // The rows a lane follows, from the feed's rule for it (a pattern per field; every given field must match).
+  function laneState(id) {
+    const rule = ((S.feed.static || {}).laneSchedule || {})[id];
+    if (!rule) return null;
+    const test = (pat, v) => !pat || new RegExp(pat, 'i').test(String(v || ''));
+    const rows = schedule().filter(r => (!rule.mission || String(rule.mission).split('|').includes(r.mission)) &&
+      test(rule.stage && '^(' + rule.stage + ')$', r.stage) && test(rule.group, r.group) && test(rule.item, r.item));
+    return rowsState(rows);
+  }
+  // The coaching questions' pace since Vince's weekly minimum began: fully answered against the straight
+  // line that finishes capture on its schedule date, and, after a week, where the last two weeks' pace leads.
+  function pace() {
+    const st = S.feed.static || {};
+    const start = parseDate(st.coachingPaceStart), w = questionLane();
+    const row = schedule().find(r => /coaching knowledge capture/i.test(r.item));
+    if (!start || !w || !row || !row.finishD) return null;
+    const hist = (S.feed.history || []).filter(p => p[w.id]).map(p => ({ d: parseDate(p.date), c: p[w.id].c })).filter(p => p.d);
+    if (!hist.length) return null;
+    const upTo = d => { const b = hist.filter(p => p.d <= d); return b.length ? b[b.length - 1].c : hist[0].c; };
+    const base = upTo(start), total = w.progress.total, now = w.progress.complete;
+    const today = startOfToday(), elapsed = Math.round((today - start) / DAY), span = Math.min(elapsed, 14);
+    const weeksLeft = Math.max(1, (row.finishD - today) / (7 * DAY));
+    const res = { start, base, total, now, row, hist, finish: row.finishD, span, needPerWeek: Math.max(0, Math.ceil((total - now) / weeksLeft)), rate: null, projected: null, behind: false, text: '' };
+    if (elapsed >= 7 && now < total) {
+      res.rate = (now - upTo(new Date(+today - span * DAY))) / span;
+      res.projected = res.rate > 0 ? new Date(+today + Math.ceil((total - now) / res.rate) * DAY) : null;
+      res.behind = !res.projected || res.projected > row.finishD;
+      res.text = res.projected ? `at the last ${span} days’ pace, capture finishes about ${fmtD(res.projected)}, after ${fmtD(row.finishD)}`
+        : `none fully answered in the last ${span} days, so capture won’t finish by ${fmtD(row.finishD)}`;
+    }
+    return res;
+  }
+  // How far a forecast window sits past its target: "3 to 4 months after target".
+  function slip(target, from, to) {
+    const a = Math.round((from - target) / DAY), b = Math.round((to - target) / DAY);
+    if (b <= 0) return 'on or before target';
+    const unit = d => d < 14 ? [d, 'day'] : d < 61 ? [Math.round(d / 7), 'week'] : [Math.round(d / 30.4), 'month'];
+    const say = ([n, u]) => n + ' ' + u + (n === 1 ? '' : 's');
+    const [x, u1] = unit(Math.max(a, 0)), [y, u2] = unit(b);
+    if (a <= 0) return 'up to ' + say([y, u2]) + ' after target';
+    if (u1 === u2) return (x === y ? say([y, u2]) : `${x} to ${say([y, u2])}`) + ' after target';
+    return `${say([x, u1])} to ${say([y, u2])} after target`;
+  }
+
   // Coaching questions newly fully answered this week (since Monday), from the daily counts, against
   // Vince's weekly minimum (2026-11-01).
   function coachingWeek() {
     const min = S.feed.static && S.feed.static.coachingWeeklyMin;
-    const w = workstreams().find(x => x.progress && /question/i.test(x.progress.measure || ''));
+    const w = questionLane();
     const h = (S.feed.history || []).filter(p => w && p[w.id]);
     if (!min || !w || !h.length) return null;
     const now = new Date();
@@ -345,10 +469,10 @@
   }
 
   // A schedule chart: one category per line (cats), bars solid up to today and lighter after (a done bar is
-  // solid throughout, a late one ringed in rose), thin bars for milestone forecast windows, and diamonds:
-  // solid for a forecast or actual date, hollow for a target.
+  // solid throughout, one behind schedule ringed in rose, one at risk in orange), thin bars for milestone
+  // forecast windows, and diamonds: solid for a forecast or actual date, hollow for a target.
   function drawGantt(el, cats, bars, marks, compact, axisTop) {
-    const muted = css('--muted'), ink = css('--ink'), ink2 = css('--ink-2'), grid = css('--chart-grid'), amber = css('--amber'), rose = css('--rose'), panel = css('--panel');
+    const muted = css('--muted'), ink = css('--ink'), ink2 = css('--ink-2'), grid = css('--chart-grid'), amber = css('--amber'), rose = css('--rose'), orange = css('--orange'), panel = css('--panel');
     el.style.height = (cats.length * (compact ? 19 : 23) + 64) + 'px';
     const today = startOfToday();
     const times = bars.flatMap(b => [+b.start, +b.end]).concat(marks.map(m => +m.date));
@@ -381,7 +505,7 @@
             kids.push({ type: 'rect', shape: { x, y: y0, width: t - x, height: h, r: [r, 0, 0, r] }, style: { fill: b.color } });
             kids.push({ type: 'rect', shape: { x: t, y: y0, width: x + w - t, height: h, r: [0, r, r, 0] }, style: { fill: b.color + '4D', stroke: b.color, lineWidth: 1, lineDash: [3, 3] } });
           }
-          if (b.late) kids.push({ type: 'rect', shape: { x: x - 2, y: y0 - 2, width: w + 4, height: h + 4, r: r + 2 }, style: { fill: 'none', stroke: rose, lineWidth: 2 } });
+          if (b.late || b.risk) kids.push({ type: 'rect', shape: { x: x - 2, y: y0 - 2, width: w + 4, height: h + 4, r: r + 2 }, style: { fill: 'none', stroke: b.late ? rose : orange, lineWidth: 2 } });
           return { type: 'group', children: kids };
         },
         encode: { x: [1, 2], y: 0 },
@@ -398,32 +522,27 @@
     if (!rows.some(r => r.startD)) { el.style.height = '320px'; return gantt(el, compact); }
     const ms = new Map(milestones().map(m => [m.id, m]));
     const cats = [], bars = [], marks = [];
-    // Under its heading a line drops a prefix the heading already says: "Food: build" under Food logging reads "Build".
-    const short = (item, grp) => {
-      const m = item.match(/^([^:]{1,40}):\s+(.+)$/);
-      const p = m && m[1].toLowerCase(), g = grp.toLowerCase();
-      return m && (g.includes(p) || g.includes(p.replace(/s$/, ''))) ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : item;
-    };
     let group = null;
     rows.forEach(r => {
       if (r.group !== group) { group = r.group; cats.push({ label: r.group, head: true }); }
-      cats.push({ label: short(r.item, r.group), head: false });
-      const y = cats.length - 1, color = sColor(r.mission), late = isLate(r);
+      cats.push({ label: shortItem(r.item, r.group), head: false });
+      const y = cats.length - 1, color = sColor(r.mission), st = rowState(r), late = st.s === 'behind', risk = st.s === 'risk';
+      const stateTip = late ? '<br><b>Behind schedule</b>' : risk ? '<br><b>At risk:</b> ' + esc(st.why.map(t => t.replace(/^[^:]*:\s*/, '')).join('; ')) : '';
       const m = r.milestone && ms.get(r.milestone), tgt = m && m.targetD;
       const tgtTip = tgt ? '<br>Target ' + fmtLong(tgt) : '';
       if (r.milestone) {
         if (r.done && r.finishD) marks.push({ y, date: r.finishD, kind: 'f', color, tip: `${esc(r.item)}<br>Done ${fmtLong(r.finishD)}${tgtTip}` });
         else if (r.startD) {
           const span = r.finishD && r.finishD - r.startD > DAY;
-          const tip = `${esc(r.item)}<br>Forecast ${span ? fmt(r.startD) + ' to ' + fmtLong(r.finishD) : fmtLong(r.startD)}${tgtTip}${late ? '<br><b>Late</b>' : ''}`;
-          if (span) bars.push({ y, start: r.startD, end: r.finishD, color, thin: true, late, tip });
+          const tip = `${esc(r.item)}<br>Forecast ${span ? fmt(r.startD) + ' to ' + fmtLong(r.finishD) : fmtLong(r.startD)}${tgtTip}${stateTip}`;
+          if (span) bars.push({ y, start: r.startD, end: r.finishD, color, thin: true, late, risk, tip });
           marks.push({ y, date: r.startD, kind: 'f', color, tip });
           if (span) marks.push({ y, date: r.finishD, kind: 'f', color, tip });
         }
         if (tgt && !(r.done && r.finishD && Math.abs(tgt - r.finishD) <= DAY)) marks.push({ y, date: tgt, kind: 't', tip: `${esc(r.item)}<br>Target ${fmtLong(tgt)}` });
       } else if (r.startD && r.finishD) {
-        bars.push({ y, start: r.startD, end: new Date(+r.finishD + DAY), color, done: r.done, late,
-          tip: `${esc(r.item)}<br>${fmt(r.startD)} to ${fmtLong(r.finishD)} · ${esc([r.stage, r.status].filter(Boolean).join(', '))}${late ? '<br><b>Late</b>' : ''}` });
+        bars.push({ y, start: r.startD, end: new Date(+r.finishD + DAY), color, done: r.done, late, risk,
+          tip: `${esc(r.item)}<br>${fmt(r.startD)} to ${fmtLong(r.finishD)} · ${esc([r.stage, r.status].filter(Boolean).join(', '))}${stateTip}` });
       }
     });
     drawGantt(el, cats, bars, marks, compact, true);
@@ -436,16 +555,19 @@
     const groups = [];
     rows.forEach(r => {
       let g = groups.find(x => x.label === r.group);
-      if (!g) { g = { label: r.group, head: true, start: r.startD, end: r.finishD, n: {}, done: true, late: false }; groups.push(g); }
+      if (!g) { g = { label: r.group, head: true, start: r.startD, end: r.finishD, n: {}, done: true, rows: [] }; groups.push(g); }
       if (r.startD < g.start) g.start = r.startD;
       if (r.finishD > g.end) g.end = r.finishD;
       if (!r.milestone) g.n[r.mission] = (g.n[r.mission] || 0) + 1;
       if (!r.done) g.done = false;
-      if (isLate(r)) g.late = true;
+      g.rows.push(r);
     });
-    const bars = groups.map((g, y) => ({ y, start: g.start, end: new Date(+g.end + DAY), done: g.done, late: g.late,
-      color: sColor(Object.keys(g.n).sort((a, b) => g.n[b] - g.n[a])[0] || 'all'),
-      tip: `${esc(g.label)}<br>${fmt(g.start)} to ${fmtLong(g.end)}${g.done ? ' · done' : ''}${g.late ? '<br><b>Something here is late</b>' : ''}` }));
+    const bars = groups.map((g, y) => {
+      const st = rowsState(g.rows).s;
+      return { y, start: g.start, end: new Date(+g.end + DAY), done: g.done, late: st === 'behind', risk: st === 'risk',
+        color: sColor(Object.keys(g.n).sort((a, b) => g.n[b] - g.n[a])[0] || 'all'),
+        tip: `${esc(g.label)}<br>${fmt(g.start)} to ${fmtLong(g.end)} · ${STATUS_LABEL[st].toLowerCase()}` };
+    });
     const marks = [];
     const launch = rows.find(r => r.milestone && /launch/i.test(r.item));
     const y = launch ? groups.findIndex(g => g.label === launch.group) : -1;
@@ -456,7 +578,7 @@
     }
     drawGantt(el, groups, bars, marks, compact, false);
   }
-  const schedLegend = () => `<div class="sched-legend">${SCHED_LEGEND.map(([k, t]) => `<span><i style="background:${sColor(k)}"></i>${esc(t)}</span>`).join('')}<span><i class="pl"></i>Planned</span><span><i class="late"></i>Late</span><span>&#9670; forecast or actual &middot; &#9671; target</span></div>`;
+  const schedLegend = () => `<div class="sched-legend">${SCHED_LEGEND.map(([k, t]) => `<span><i style="background:${sColor(k)}"></i>${esc(t)}</span>`).join('')}<span><i class="pl"></i>Planned</span><span><i class="risk"></i>At risk</span><span><i class="late"></i>Behind</span><span>&#9670; forecast or actual &middot; &#9671; target</span></div>`;
 
   function decisionsByMonth() {
     const counts = new Map();
@@ -515,7 +637,7 @@
   function wsCard(w, i) {
     const p = w.progress;
     const bar = p && p.total ? `<div class="bar"><i style="width:${(p.complete / p.total * 100).toFixed(1)}%;background:${pColor(w)}"></i><i style="width:${((p.partial || 0) / p.total * 100).toFixed(1)}%;background:${pColor(w)}55"></i></div>` : '';
-    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}<b>${esc(w.name)}</b>
+    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}${needsChip(w)}<b>${esc(w.name)}</b>
       <div class="now">${w.now ? 'Now: ' + esc(w.now) : ''}${w.next && !w.closed ? '<br>Next: ' + esc(w.next) : ''}</div>${bar}</a>`;
   }
   // When the summary was last checked, the site's copy of the whole document, and the original.
@@ -595,7 +717,7 @@
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
         </div>
         <div class="grid g2">
-          <div class="card rise"><h3>Schedule to launch</h3><div class="sub">Each area from its first stage to its last · solid up to today · <a href="#roadmap">Full schedule &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
+          <div class="card rise"><h3>Schedule to launch</h3><div class="sub">${esc(stateSummary(areas()))} · <a href="#roadmap">Where each area is &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
           <div class="card rise"><h3>Decisions per month</h3><div class="sub">${decCount} decisions recorded in the Registry · <a href="#decisions">All decisions &rsaquo;</a></div><div class="chart" id="decBar" style="height:300px"></div></div>
         </div>
         <div class="sec-title" id="sec-workstreams">Workstreams</div>
@@ -625,7 +747,8 @@
     const p = w.progress;
     return `<div class="wrap">
       <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="crumb"><a href="#workstreams">Status &rsaquo; Workstreams</a> &rsaquo;</div><h1>${esc(w.name)}</h1>
-        <div>${chip(w.status)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
+        <div>${chip(w.status)}${needsChip(w)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
+      ${w.sched && w.sched.why.length ? `<div class="card rise"><h3>${esc(STATUS_LABEL[w.status])}</h3><ul class="why">${w.sched.why.map(t => `<li>${esc(t)}</li>`).join('')}</ul><div class="sub" style="margin-top:8px"><a href="#roadmap">Schedule and milestones &rsaquo;</a></div></div>` : ''}
       ${w.waiting && !w.closed ? `<div class="callout rise"><b>${esc(w.waiting)}</b><span class="sub">${esc(w.waitingWhen)}${w.blocked ? ' · blocked ' + w.blocked + ' days' : ''}</span>${waitingDetail(w.waitingDetail)}</div>` : ''}
       <div class="grid g-half">
         ${p && p.total ? `<div class="card rise"><h3>Progress</h3><div class="sub">${esc(p.measure)}</div><div class="chart" id="wsRing" style="height:230px"></div>
@@ -640,28 +763,181 @@
     if (w && w.progress && w.progress.total) ring($('#wsRing', root), w.progress, pColor(w));
   }
 
+  // "10 on track · 1 at risk · 1 done", across the schedule's areas.
+  function stateSummary(list) {
+    if (!list.length) return 'Each area from its first stage to its last';
+    const n = s => list.filter(a => a.s === s).length;
+    return ['behind', 'risk', 'track', 'done'].filter(s => n(s)).map(s => n(s) + ' ' + STATUS_LABEL[s].toLowerCase()).join(' · ');
+  }
+  const stateDot = s => `<span class="sd" style="--c:var(${STATE_COLOR[s] || '--steel'})"></span>`;
+  const mini = items => items.length ? `<ul class="mini">${items.join('')}</ul>` : '<p class="empty">None</p>';
+  const miniItem = (s, text, date) => `<li>${stateDot(s)}<span>${text}</span>${date ? `<span class="dt">${esc(date)}</span>` : ''}</li>`;
+  // A bar of done (solid) and in progress (light) out of a total, with its label.
+  const meter = (label, done, prog, total, color) => total ? `<div class="meter"><span>${esc(label)}</span><div class="bar"><i style="width:${(done / total * 100).toFixed(1)}%;background:${color}"></i><i style="width:${(prog / total * 100).toFixed(1)}%;background:${color}55"></i></div></div>` : '';
+  const cardMeter = (cards, label) => meter(`${cards.filter(c => c.cat === 'done').length} of ${cards.length} ${label}`, cards.filter(c => c.cat === 'done').length, cards.filter(c => c.cat === 'indeterminate').length, cards.length, css('--sky'));
+  const reqMeter = a => { const r = a.records || [], d = r.filter(x => x.cat === 'done').length; return meter(`${d} of ${r.length} requirements approved`, d, 0, r.length, css('--teal')); };
+  // The target line for an area: its last milestone with a target, and how far the forecast sits from it.
+  function targetLine(a) {
+    const ms = new Map(milestones().map(m => [m.id, m]));
+    const r = a.rows.filter(x => x.milestone && ms.get(x.milestone) && ms.get(x.milestone).targetD).pop();
+    if (!r) return '';
+    const t = ms.get(r.milestone).targetD;
+    if (r.done) return `${shortItem(r.item, a.name)}: done ${fmtD(r.finishD)}, target ${fmtD(t)}`;
+    if (!r.startD) return `${shortItem(r.item, a.name)}: target ${fmtD(t)}, no forecast yet`;
+    const to = r.finishD || r.startD;
+    return `${shortItem(r.item, a.name)}: target ${fmtD(t)} · forecast ${fmtD(r.startD)}${+to !== +r.startD ? ' to ' + fmtD(to) : ''} · ${slip(t, r.startD, to)}`;
+  }
+  // One area: its state, where it is and what's next; tapped open, its reasons, stages and Jira cards.
+  function areaRow(a) {
+    const stages = a.rows.filter(r => !r.milestone);
+    const label = r => esc(shortItem(r.item, a.name));
+    const now = stages.filter(r => /in progress/i.test(r.status));
+    const nextStage = stages.filter(r => /planned/i.test(r.status)).sort((x, y) => (x.startD || 0) - (y.startD || 0))[0];
+    const cards = a.cards || [];
+    const selected = cards.filter(c => /selected/i.test(c.status));
+    const line = a.s === 'done' ? 'Every stage done'
+      : [now.length ? 'Now: ' + now.map(r => `${label(r)} to ${esc(fmtD(r.finishD))}`).join(', ') : '',
+        nextStage ? `Next: ${label(nextStage)}${nextStage.startD ? ', ' + esc(fmtD(nextStage.startD)) : ''}` : ''].filter(Boolean).join(' · ');
+    const tl = targetLine(a);
+    const meters = (cards.length ? cardMeter(cards, 'build cards done') : '') + (a.req ? reqMeter(a.req) : '');
+    const nowItems = now.map(r => miniItem(rowState(r).s, label(r), 'to ' + fmtD(r.finishD)))
+      .concat(cards.filter(c => c.cat === 'indeterminate').map(c => miniItem('track', 'Card: ' + esc(c.name), c.status)));
+    const nextItems = selected.length ? selected.map(c => miniItem('track', 'Card: ' + esc(c.name), 'selected'))
+      : nextStage ? [miniItem(rowState(nextStage).s, label(nextStage), nextStage.startD ? 'from ' + fmtD(nextStage.startD) : '')] : [];
+    const doneItems = stages.filter(r => r.done && r.finishD && daysSince(r.finishD) <= SOON && daysSince(r.finishD) >= 0).map(r => miniItem('done', label(r), fmtD(r.finishD)))
+      .concat(cards.filter(c => c.cat === 'done' && movedRecently(c)).map(c => miniItem('done', 'Card: ' + esc(c.name), fmtD(parseDate(c.changed)))))
+      .concat(a.req ? (() => { const n = (a.req.records || []).filter(x => x.cat === 'done' && daysSince(parseDate(x.changed)) <= SOON).length; return n ? [miniItem('done', `${n} requirement${n === 1 ? '' : 's'} approved`, '')] : []; })() : []);
+    const stageList = a.rows.map(r => {
+      const st = rowState(r).s;
+      const when = r.milestone ? (r.done ? 'done ' + fmtD(r.finishD) : r.startD ? 'forecast ' + fmtD(r.startD) + (r.finishD && +r.finishD !== +r.startD ? ' to ' + fmtD(r.finishD) : '') : 'no forecast')
+        : (r.startD ? fmtD(r.startD) + (r.finishD ? ' to ' + fmtD(r.finishD) : '') : '');
+      return miniItem(st, label(r) + ` <span class="sub">· ${esc(r.milestone ? 'Milestone' : r.status)}</span>`, when);
+    });
+    const cardList = cards.map(c => `<li><span class="cs ${esc(c.cat)}">${esc(c.status)}</span><span>${esc(c.name)}</span></li>`);
+    return `<details class="area" style="--c:var(${STATE_COLOR[a.s] || '--steel'})">
+      <summary><span class="area-top"><b>${esc(a.name)}</b>${chip(a.s)}</span>${line ? `<span class="area-line">${line}</span>` : ''}${tl ? `<span class="area-tgt">${esc(tl)}</span>` : ''}${meters ? `<span class="meters">${meters}</span>` : ''}</summary>
+      <div class="area-body">
+        ${a.why.length ? `<ul class="why">${a.why.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+        <div class="area-cols"><div><h4>Now</h4>${mini(nowItems)}</div><div><h4>Next</h4>${mini(nextItems)}</div><div><h4>Done in the last 7 days</h4>${mini(doneItems)}</div></div>
+        <h4>Stages</h4><ul class="mini">${stageList.join('')}</ul>
+        ${cardList.length ? `<h4>Build cards</h4><ul class="mini cards">${cardList.join('')}</ul>` : ''}
+      </div></details>`;
+  }
+  // Stages starting or due, and milestone windows opening, in the next two weeks.
+  function nextTwoWeeks() {
+    const today = startOfToday(), end = new Date(+today + 14 * DAY), out = [];
+    const inWin = d => d && d >= today && d <= end;
+    schedule().forEach(r => {
+      if (r.done) return;
+      if (r.milestone) { if (inWin(r.startD)) out.push({ d: r.startD, r, kind: 'forecast window opens' }); return; }
+      if (/planned/i.test(r.status) && inWin(r.startD)) out.push({ d: r.startD, r, kind: 'starts' });
+      if (inWin(r.finishD)) out.push({ d: r.finishD, r, kind: 'due' });
+    });
+    return out.sort((a, b) => a.d - b.d);
+  }
+  function releasesCard() {
+    const rel = schedule().filter(r => /^release$/i.test(r.stage) && releaseNo(r.item));
+    if (!rel.length) return '';
+    const b = board();
+    return `<div class="card rise"><h3>Capture releases</h3><div class="sub">Build cards done out of each release’s total. Done means built and checked, not released.</div>
+      <div class="rel-list">${rel.map(r => {
+        const cards = releaseCards(releaseNo(r.item)), st = rowState(r).s;
+        const areasIn = b ? (b.areas || []).filter(a => (a.releases || []).some(x => releaseNo(x) === releaseNo(r.item))).map(a => a.name.split(':')[0]) : [];
+        return `<div class="rel"><div class="area-top"><b>${esc(r.item)}</b>${chip(st)}</div>
+          <div class="sub">${r.startD ? esc(fmtD(r.startD) + ' to ' + fmtD(r.finishD)) : ''}${areasIn.length ? ' · ' + esc(areasIn.join(', ')) : ''}</div>
+          ${cards.length ? cardMeter(cards, 'cards done') : `<p class="sub">${b ? 'No build cards yet: they’re added from each area’s build package.' : 'The build board couldn’t be read at the last refresh.'}</p>`}</div>`;
+      }).join('')}</div></div>`;
+  }
+  function requirementsCard() {
+    const r = reqs();
+    if (!r || !(r.areas || []).length) return '';
+    const due = name => { const row = schedule().find(x => /^requirements$/i.test(x.stage) && areaKey(x.group) === areaKey(name)); return row && !row.done && row.finishD ? row : null; };
+    return `<div class="card rise"><h3>Requirements before build</h3><div class="sub">Approved requirements out of each area’s total. Building waits on them.</div>
+      <div class="rel-list">${r.areas.map(a => {
+        const row = due(a.name), st = row ? rowState(row).s : null;
+        return `<div class="rel"><div class="area-top"><b>${esc(a.name.replace(/\s+requirements$/i, ''))}</b>${st ? chip(st) : ''}</div>
+          ${row ? `<div class="sub">Due ${esc(fmtD(row.finishD))}</div>` : ''}${reqMeter(a)}</div>`;
+      }).join('')}</div></div>`;
+  }
+  function paceCard() {
+    const p = pace(), wk = coachingWeek();
+    if (!p) return '';
+    const left = p.total - p.now;
+    const lineTxt = p.rate == null ? `The pace shows after the first full week, ${fmtD(new Date(+p.start + 7 * DAY))}.`
+      : p.behind ? 'At risk: ' + p.text + '.' : `At the last ${p.span} days’ pace, capture finishes about ${fmtD(p.projected)}, on time.`;
+    return `<div class="card rise"><h3>Coaching questions pace</h3>
+      <div class="sub">${wk ? `${wk.done} of ${wk.min} this week · ` : ''}${left} left, about ${p.needPerWeek} a week to finish by ${esc(fmtD(p.finish))}</div>
+      <div class="chart" id="paceChart" style="height:240px"></div><p class="sub">${esc(lineTxt)} Main questions fully answered, counted from Jira each day.</p></div>`;
+  }
+  function drawPace(el) {
+    const p = pace();
+    if (!el || !p) return;
+    const muted = css('--muted'), grid = css('--chart-grid'), purple = css('--purple'), orange = css('--orange'), amber = css('--amber');
+    const from = new Date(+p.start - 7 * DAY), end = new Date(Math.max(+p.finish, p.projected && p.behind ? Math.min(+p.projected, +p.finish + 42 * DAY) : 0) + 3 * DAY);
+    const today = startOfToday();
+    const actual = p.hist.filter(h => h.d >= from).map(h => [h.d, h.c]);
+    if (!actual.length || +actual[actual.length - 1][0] < +today) actual.push([today, p.now]);
+    const series = [
+      { name: 'Fully answered', type: 'line', data: actual, symbolSize: 6, lineStyle: { width: 3, color: purple }, itemStyle: { color: purple }, areaStyle: { color: purple + '22' } },
+      { name: 'Needed', type: 'line', data: [[p.start, p.base], [p.finish, p.total]], symbol: 'none', lineStyle: { width: 2, type: 'dashed', color: muted }, itemStyle: { color: muted } },
+    ];
+    if (p.rate != null) {
+      const tEnd = p.projected && p.projected <= end ? p.projected : end;
+      series.push({ name: 'Current pace', type: 'line', symbol: 'none', lineStyle: { width: 2, type: 'dotted', color: p.behind ? orange : css('--green') }, itemStyle: { color: p.behind ? orange : css('--green') },
+        data: [[today, p.now], [tEnd, Math.min(p.total, p.now + p.rate * Math.round((tEnd - today) / DAY))]] });
+    }
+    series[0].markLine = { symbol: 'none', silent: true, label: { formatter: 'Today', color: amber, fontWeight: 800, fontSize: 11 }, lineStyle: { color: amber, width: 2, type: 'solid' }, data: [{ xAxis: today }] };
+    chart(el, {
+      grid: { left: 36, right: 14, top: 18, bottom: 46 },
+      tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '' : Math.round(v) },
+      legend: { bottom: 0, textStyle: { color: muted, fontSize: 12 } },
+      xAxis: { type: 'time', min: from, max: end, splitNumber: window.innerWidth < 560 ? 3 : 6,
+        axisLabel: { color: muted, fontSize: 11, hideOverlap: true, formatter: v => fmtD(new Date(v)) }, axisLine: { lineStyle: { color: grid } }, splitLine: { show: false } },
+      yAxis: { type: 'value', min: Math.max(0, Math.floor((p.base - 5) / 10) * 10), max: p.total, axisLabel: { color: muted }, splitLine: { lineStyle: { color: grid } } },
+      series,
+    });
+  }
+
   function pageRoadmap() {
     const ms = milestones();
     const up = ms.filter(m => !/complete/i.test(m.status)).sort((a, b) => (a.targetD || 9e15) - (b.targetD || 9e15));
     const reached = ms.filter(m => /complete/i.test(m.status)).sort((a, b) => (b.actualD || b.targetD || 0) - (a.actualD || a.targetD || 0));
-    const late = m => m.actualD && m.targetD && m.actualD - m.targetD > DAY ? ` <span class="chip stalled">${Math.round((m.actualD - m.targetD) / DAY)} days after target</span>` : '';
+    const late = m => m.actualD && m.targetD && m.actualD - m.targetD > DAY ? ` <span class="chip behind">${Math.round((m.actualD - m.targetD) / DAY)} days after target</span>` : '';
     const rows = schedule();
     const reviewed = parseDate(S.feed.schedule && S.feed.schedule.reviewed);
-    const behind = rows.filter(isLate);
-    const wk = coachingWeek();
-    const lead = rows.length ? 'Every stage from June 2026 to launch. Past dates are estimates; future dates are forecasts' + (reviewed ? ', last reviewed ' + fmtLong(reviewed) : '') + '.'
+    const lead = rows.length ? 'Where each area is, what’s next and whether it’s on schedule, from the Registry’s schedule and the Jira build board' + (reviewed ? '. Forecast last reviewed ' + fmtLong(reviewed) : '') + '.'
       : 'Target windows are the sponsor’s planning dates, not forecasts.';
+    const list = rows.length ? areas() : [];
+    // Areas still under way first, in delivery order; finished ones last.
+    const ordered = list.filter(a => a.s !== 'done').concat(list.filter(a => a.s === 'done'));
+    const b = S.feed.build, read = b && b.status === 'ok' ? parseDate(b.checked) : null;
+    const soon = rows.length ? nextTwoWeeks() : [];
+    const docLink = (S.feed.menus || []).some(m => (m.groups || []).some(g => (g.items || []).some(i => i.copy === 'jira-views')));
+    const boardNote = [read ? 'Build cards read from Jira ' + esc(fmtLong(read)) + ', ' + esc(fmtTime(read)) : b && b.status ? 'The build board couldn’t be read at the last refresh' : '',
+      docLink ? '<a href="#doc-jira-views">Jira guide</a>' : '',
+      b && /^https:\/\/[\w-]+\.atlassian\.net\//.test(b.board || '') ? `<a href="${esc(b.board)}" target="_blank" rel="noopener">Build board ${extMark(b.board)}</a>` : ''].filter(Boolean).join(' · ');
+    const milestoneSub = m => {
+      const f = parseDate(m.forecastEarliest), l = parseDate(m.forecastLatest) || f;
+      return `${m.targetD ? 'Target ' + esc(fmtLong(m.targetD)) : 'No target yet'} · ${f ? 'forecast ' + esc(fmtD(f)) + (l && +l !== +f ? ' to ' + esc(fmtD(l)) : '') + (m.targetD ? ' · ' + esc(slip(m.targetD, f, l)) : '') : 'no forecast yet'}`;
+    };
     return head(crumb('roadmap', 'Schedule and milestones'), 'Schedule and milestones', lead) +
       `<div class="wrap">
-      ${rows.length ? `<div class="grid g-half">
-        <div class="card rise"><h3>Behind schedule</h3>${behind.length ? `<ul class="done-list">${behind.map(r => `<li><span class="d">${esc(fmt(r.finishD))}</span><span>${esc(r.item)}<br><span class="sub">${esc(r.group)} · due ${esc(fmtLong(r.finishD))}</span></span></li>`).join('')}</ul>` : '<p class="empty">Nothing is past its finish date.</p>'}</div>
-        <div class="card rise"><h3>Coaching questions this week</h3>${wk ? `<div class="big-num">${wk.done}<small> of ${wk.min} since Monday</small></div><div class="bar"><i style="width:${Math.min(100, wk.done / wk.min * 100).toFixed(1)}%;background:${css('--purple')}"></i></div><div class="sub">Main questions fully answered, counted from Jira each day; ${wk.min} a week is your minimum.</div>` : '<p class="empty">Not counted yet.</p>'}</div>
-      </div>` : ''}
+      ${list.length ? `<div class="card rise"><h3>Every area</h3><div class="sub">${esc(stateSummary(list))}. On track means every stage is on schedule. Tap an area for its stages and build cards.</div>
+        <div class="areas">${ordered.map(areaRow).join('')}</div>${boardNote ? `<div class="sub" style="margin-top:10px">${boardNote}</div>` : ''}</div>
+      <div class="grid g-half">
+        <div class="card rise"><h3>Next two weeks</h3><div class="sub">Stages starting or due by ${esc(fmtD(new Date(+startOfToday() + 14 * DAY)))}</div>${mini(soon.map(x => miniItem(rowState(x.r).s, `${esc(x.r.item)} <span class="sub">· ${esc(x.kind)}</span>`, fmtD(x.d))))}</div>
+        ${paceCard()}
+      </div>
+      <div class="grid g-half">${releasesCard()}${requirementsCard()}</div>` : ''}
       <div class="card rise"><h3>Schedule</h3><div class="sub">${rows.length ? 'Bars are stages, solid up to today and lighter after. Tap a bar for its dates.' : 'Sponsor target windows'}</div><div class="chart" id="sched"></div>${rows.length ? schedLegend() : ''}</div>
       <div class="grid g-half">
-        <div class="card rise"><h3>Milestones ahead</h3><ul class="done-list">${up.map(m => `<li><span class="d">${esc(m.targetD ? fmt(m.targetD) : 'No date')}</span><span>${esc(m.title)}<br><span class="sub">${m.targetD ? 'Target ' + esc(fmtLong(m.targetD)) : 'No target yet'} · ${m.forecastEarliest ? 'forecast ' + esc(fmt(parseDate(m.forecastEarliest))) : 'no forecast yet'}</span></span></li>`).join('')}</ul></div>
-        <div class="card rise"><h3>Milestones reached</h3><ul class="done-list">${reached.map(m => `<li><span class="d">${esc(fmt(m.actualD || m.targetD))}</span><span class="t">${esc(m.title)}${late(m)}</span></li>`).join('')}</ul></div>
+        <div class="card rise"><h3>Milestones ahead</h3><ul class="done-list">${up.map(m => `<li><span class="d">${esc(m.targetD ? fmtD(m.targetD) : 'No date')}</span><span>${esc(m.title)}<br><span class="sub">${milestoneSub(m)}</span></span></li>`).join('')}</ul></div>
+        <div class="card rise"><h3>Milestones reached</h3><ul class="done-list">${reached.map(m => `<li><span class="d">${esc(fmtD(m.actualD || m.targetD))}</span><span class="t">${esc(m.title)}${late(m)}</span></li>`).join('')}</ul></div>
       </div></div>`;
+  }
+  function afterRoadmap(root) {
+    scheduleChart($('#sched', root), window.innerWidth < 700);
+    drawPace($('#paceChart', root));
   }
 
   function pageDecisions() {
@@ -729,6 +1005,11 @@
     workstreams().filter(w => w.progress).forEach(w => {
       const d = parseDate(w.progress.checked);
       rows.push({ c: w.progress.stale ? css('--amber') : dot(d), b: w.name + ' counts', s: (d ? 'checked ' + fmtLong(d) : 'not checked') + (w.progress.stale ? ' · waiting for the automatic Jira refresh' : '') });
+    });
+    [['Build board (Jira)', S.feed.build], ['Requirement records (Jira)', S.feed.requirements]].forEach(([label, p]) => {
+      if (!p) return;
+      const d = p.status === 'ok' ? parseDate(p.checked) : null;
+      rows.push({ c: d ? dot(d) : css('--rose'), b: label, s: d ? 'read ' + fmtLong(d) + ', ' + fmtTime(d) : String(p.status || 'not read') });
     });
     return head(crumb('health', 'Data health'), 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
       `<div class="wrap"><div class="card rise">${rows.map(r => `<div class="health-row"><span class="dot" style="background:${r.c}"></span><span><b>${esc(r.b)}</b><span>${esc(r.s)}</span></span></div>`).join('')}
@@ -977,7 +1258,7 @@
 
   const ROUTES = {
     home: [pageHome, afterHome, 'Status'],
-    roadmap: [pageRoadmap, root => scheduleChart($('#sched', root), window.innerWidth < 700), 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
+    roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
     architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],

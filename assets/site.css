@@ -137,6 +137,11 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .chip.stalled { background: color-mix(in srgb, var(--rose) 16%, transparent); color: var(--rose); }
 .chip.track { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
 .chip.done { background: color-mix(in srgb, var(--steel) 18%, transparent); color: var(--steel); }
+/* Schedule status (2026-11-02): orange is at risk and rose behind; amber stays "waiting on Vince". */
+.chip.risk { background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange); }
+.chip.behind { background: color-mix(in srgb, var(--rose) 16%, transparent); color: var(--rose); }
+.chip.none { background: color-mix(in srgb, var(--steel) 10%, transparent); color: var(--muted); }
+.chip + .chip { margin-left: 4px; }
 .ws-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .wsc { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px; position: relative; overflow: hidden; color: var(--ink); text-decoration: none; }
 .wsc::before { content: ""; position: absolute; inset: 0 0 auto; height: 4px; background: var(--c); }
@@ -221,6 +226,39 @@ details.more .prose { margin-top: 12px; }
 .sched-legend i { display: inline-block; width: 16px; height: 8px; border-radius: 99px; }
 .sched-legend i.pl { background: transparent; border: 1.5px dashed var(--muted); }
 .sched-legend i.late { background: transparent; border: 2px solid var(--rose); }
+.sched-legend i.risk { background: transparent; border: 2px solid var(--orange); }
+/* Schedule areas: a row per area that opens to its stages and build cards. */
+.areas { display: grid; gap: 8px; margin-top: 12px; }
+details.area { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 14px; background: var(--panel-2); min-width: 0; }
+details.area > summary { list-style: none; cursor: pointer; padding: 12px 14px; display: grid; gap: 4px; }
+details.area > summary::-webkit-details-marker { display: none; }
+.area-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.area-top b { font-family: var(--display); font-size: 15px; min-width: 0; }
+details.area > summary .area-top b::before { content: "\25B8"; color: var(--muted); margin-right: 8px; display: inline-block; transition: transform .15s ease; }
+details.area[open] > summary .area-top b::before { transform: rotate(90deg); }
+.area-line { font-size: 13.5px; color: var(--ink-2); }
+.area-tgt { font-size: 12.5px; color: var(--muted); }
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px 16px; margin-top: 2px; }
+.meter > span { font-size: 12px; color: var(--muted); }
+.meter .bar { margin-top: 4px; height: 5px; }
+.area-body { padding: 2px 14px 14px; border-top: 1px solid var(--line); }
+.area-body h4 { font-family: var(--display); font-size: 13.5px; margin: 14px 0 4px; }
+.area-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 18px; }
+.mini { list-style: none; margin: 0; padding: 0; font-size: 13.5px; }
+.mini li { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.mini li:last-child { border-bottom: 0; }
+.mini .sd { flex: 0 0 9px; height: 9px; border-radius: 50%; background: var(--c); align-self: center; }
+.mini .dt { margin-left: auto; padding-left: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mini .cs { flex: 0 0 auto; font-size: 11px; font-weight: 800; border-radius: 99px; padding: 1px 8px; white-space: nowrap; background: var(--track); color: var(--muted); }
+.mini .cs.done { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.mini .cs.indeterminate { background: color-mix(in srgb, var(--sky) 16%, transparent); color: var(--sky); }
+.why { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--ink-2); }
+.why li { margin: 0 0 4px; } .why li::marker { color: var(--orange); }
+.rel-list { display: grid; gap: 12px; margin-top: 12px; }
+.rel { display: grid; gap: 3px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.rel:last-child { border-bottom: 0; padding-bottom: 0; }
+.rel .area-top b { font-size: 14.5px; }
+@media (max-width: 700px) { .area-cols { grid-template-columns: 1fr; } }
 .ws-head { border-radius: var(--r); padding: 20px; background: linear-gradient(135deg, color-mix(in srgb, var(--c) 24%, var(--panel)), var(--panel)); border: 1px solid var(--line); }
 .ws-head h1 { margin: 6px 0 4px; font-size: clamp(26px, 4vw, 34px); }
 
