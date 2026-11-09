@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
+<title>POA</title>
+<!-- Vince's private POA website (Jira PS-046 revision 5; Build Package M3-PK003, task R5; technical decision M3-TD026).
+     Page code only: no health data is in any file or address here. After Vince signs in with his own POA account,
+     the page reads his reports through the POA connector's read actions, the same ones the coach uses. -->
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">POA</a>
+  <nav id="nav" class="nav" aria-label="Pages" hidden></nav>
+  <button id="signout" class="link" type="button" hidden>Sign out</button>
+</header>
+
+<main id="main">
+  <section id="signin" class="card narrow" hidden>
+    <h1>Sign in</h1>
+    <p class="muted">Use your POA account, the same one you use to connect Claude. Only your account can sign in.</p>
+    <form id="signin-form">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </section>
+  <div id="page"></div>
+  <p id="message" class="muted" role="status" aria-live="polite"></p>
+</main>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js" integrity="sha384-BWcjm9OdFth9TbhCxZPdm+gAOUMAzQy9nmTs12ioXdCcbVnJaPMn+fMUoQCLt60R" crossorigin="anonymous"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

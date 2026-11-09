@@ -18,3 +18,4 @@ The old password stops working once the workflow finishes.
 - `index.html`, `assets/site.css`, `assets/app.js`: the site (plain HTML, CSS and JavaScript; no build step).
 - `tools/build.mjs`: reads the feed and encrypts it (Node 22, no dependencies). The documents it copies are listed in the feed (`COPIES`).
 - `.github/workflows/build.yml`: the schedule.
+- `app/`: Vince's private POA website (PS-046; Build Package M3-PK003, task R5). Page code only: no health data is in any file here. It shows nothing until Vince signs in with his own POA account, then reads his reports through the POA connector's read actions. It is not part of the project site and not behind the site password; the workflow never touches it.
