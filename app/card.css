@@ -1,0 +1,19 @@
+/* POA graph card in the conversation (Build Package M3-PK003, task R4). Loaded after app.css: the website's marks and
+   palette, laid out for Claude's inline card. card.js maps Claude's background, text and border tokens onto ours. */
+:root { --inset-top: 0px; --inset-right: 0px; --inset-bottom: 0px; --inset-left: 0px; }
+body { font-family: var(--card-font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif); font-size: 15px; }
+#card {
+  padding: calc(12px + var(--inset-top)) calc(12px + var(--inset-right)) calc(14px + var(--inset-bottom)) calc(12px + var(--inset-left));
+}
+.card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .5rem .75rem; }
+.card-title h1 { font-size: 1.05rem; margin: 0; }
+.card-title .sub { font-size: .8rem; color: var(--text-2); margin: 0; }
+.card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
+.card-body h2 { font-size: .95rem; margin: .9rem 0 .2rem; }
+.card-body .chart:first-child h3 { margin-top: .5rem; }
+@media (pointer: coarse) {
+  .seg button, .card-tools button.link { min-height: 44px; min-width: 44px; }
+}
+.skeleton .sk-title { height: 14px; width: 40%; border-radius: 6px; background: var(--grid); margin: 6px 0 12px; }
+.skeleton .sk-plot { height: 180px; border-radius: 8px; background: var(--grid); opacity: .6; }
+#card > .error { margin: 0; }
