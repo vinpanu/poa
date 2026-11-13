@@ -702,8 +702,6 @@
       (wk ? kpi(wk.done, '/' + wk.min, 'coaching questions this week, your minimum ' + wk.min, Math.min(100, wk.done / wk.min * 100).toFixed(1) + '%', `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})`)
         : kpi(decCount, '', 'decisions recorded', '100%', `linear-gradient(90deg, ${css('--sky')}, ${css('--violet')})`)) +
       (days != null ? kpi(days, ' days', 'to the ' + fmtLong(launch.targetD) + ' launch target', '', '') : '');
-    const recent = ws.flatMap(w => (w.done || []).map(d => ({ ...d, dateD: parseDate(d.date), ws: w.name })))
-      .filter(d => d.dateD && daysSince(d.dateD) <= 7).sort((a, b) => b.dateD - a.dateD).slice(0, 6);
     return `
       <section class="hero"><div class="hero-in">
         <div class="kicker rise">Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
@@ -712,6 +710,7 @@
         <div class="kpis">${kpis}</div>
       </div></section>
       <div class="wrap">
+        <div class="card rise" id="sec-glance"><h3>Done, now and next</h3><div class="sub">The last two weeks, today and the next four weeks · <a href="#roadmap">Full schedule &rsaquo;</a></div>${glance()}</div>
         <div class="card rise" id="sec-waiting"><h3>Waiting on Vince</h3><div class="sub">${needs.length ? 'These can’t move without you. Red means no update for three days or more.' : 'Nothing is waiting on you right now'}</div>${needs.map(needItem).join('')}</div>
         <div class="grid g-pair">
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
@@ -722,10 +721,6 @@
         </div>
         <div class="sec-title" id="sec-workstreams">Workstreams</div>
         <div class="ws-strip">${ws.map(wsCard).join('')}${idle.map(m => `<div class="wsc" style="--c:${mColor(m)}"><span class="chip done">Not started</span><b>${esc(MISSION_NAME[m])}</b><div class="now">Mission ${m} · no active workstream</div></div>`).join('')}</div>
-        <div class="grid g-half">
-          <div class="card rise"><h3>Done this week</h3>${recent.length ? `<ul class="done-list">${recent.map(d => `<li><span class="d">${esc(fmt(d.dateD))}</span><span class="t">${esc(d.text)} <span class="sub">· ${esc(d.ws)}</span></span></li>`).join('')}</ul>` : '<p class="empty">Nothing recorded as finished in the last 7 days.</p>'}</div>
-          <div class="card rise"><h3>Coming up</h3>${comingUp()}</div>
-        </div>
         <p class="sub">More: <a href="#trends">Progress trends</a> · <a href="#health">Data health</a></p>
       </div>`;
   }
@@ -735,10 +730,39 @@
     scheduleOverview($('#gantt', root), window.innerWidth < 700);
     decisionBars($('#decBar', root));
   }
-  function comingUp() {
-    const up = milestones().filter(m => !/complete/i.test(m.status) && m.targetD && m.targetD >= Date.now() - DAY).sort((a, b) => a.targetD - b.targetD).slice(0, 4);
-    if (!up.length) return '<p class="empty">No upcoming dated milestones.</p>';
-    return `<ul class="done-list">${up.map(m => `<li><span class="d">${esc(fmt(m.targetD))}</span><span>${esc(m.title)}<br><span class="sub">Target · ${m.forecastEarliest ? 'forecast ' + esc(fmt(parseDate(m.forecastEarliest))) : 'no forecast yet'}</span></span></li>`).join('')}</ul>`;
+  // Done, now and next (Vince, 2026-11-13: "a concise visual to see what's been completed recently, what's
+  // up now and what is coming in the near future", at any time). Done: the lanes' recently done lines from
+  // the last two weeks. Now: what waits on Vince, then each area's stages under way or due to have started,
+  // worst first. Coming up: each area's next stage starting in the next four weeks, then the launch window.
+  // All read from the Registry and Jira like the rest of the page, so it stays current by itself.
+  const GLANCE_BACK = 14, GLANCE_AHEAD = 28;
+  const lowerFirst = s => /^.[a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
+  function glance() {
+    const ws = workstreams(), today = startOfToday(), until = new Date(+today + GLANCE_AHEAD * DAY);
+    const li = (d, body) => `<li><span class="d">${esc(d)}</span><span class="t">${body}</span></li>`;
+    const list = (items, cls, empty) => items.length ? `<ul class="done-list${cls}">${items.join('')}</ul>` : `<p class="empty">${empty}</p>`;
+    const done = ws.flatMap(w => (w.done || []).map(d => ({ dateD: parseDate(d.date), text: d.text })))
+      .filter(d => d.dateD && daysSince(d.dateD) <= GLANCE_BACK).sort((a, b) => b.dateD - a.dateD).slice(0, 8)
+      .map(d => li(fmt(d.dateD), esc(d.text)));
+    const started = r => !r.done && !r.milestone && (/in progress/i.test(r.status) || (r.startD && r.startD < today));
+    const you = ws.filter(w => w.waiting && !w.closed)
+      .map(w => li('You', `<a href="#${slug(w.id)}">${esc(w.waiting)}</a>${w.waitingWhen ? ` <span class="sub">· ${esc(w.waitingWhen)}</span>` : ''}`));
+    const under = areas().map(a => ({ a, rows: a.rows.filter(started) })).filter(x => x.rows.length).map(x => {
+      const st = rowsState(x.rows).s, due = x.rows.map(r => r.finishD).filter(Boolean).sort((p, q) => p - q)[0];
+      return { st, due, html: `<b>${esc(x.a.name)}</b>: ${esc(x.rows.map(r => lowerFirst(shortItem(r.item, x.a.name))).join(', '))}${st === 'risk' || st === 'behind' ? ' ' + chip(st) : ''}` };
+    }).sort((p, q) => SEVERITY[q.st] - SEVERITY[p.st] || (p.due || 0) - (q.due || 0));
+    const now = you.concat(under.slice(0, 8).map(u => li(u.due ? 'Due ' + fmt(u.due) : '', u.html)));
+    const more = under.length > 8 ? `<p class="sub">And ${under.length - 8} more on the <a href="#roadmap">schedule</a></p>` : '';
+    const next = areas().map(a => a.rows.filter(r => !r.done && !started(r) && r.startD && r.startD >= today && r.startD <= until).sort((p, q) => p.startD - q.startD)[0])
+      .filter(Boolean).sort((p, q) => p.startD - q.startD).slice(0, 6).map(r => li(fmt(r.startD), esc(r.item)));
+    const l = milestones().find(m => /launch/i.test(m.title) && !/complete/i.test(m.status));
+    const lf = l && parseDate(l.forecastEarliest), ll = l && (parseDate(l.forecastLatest) || lf);
+    const launch = l && (lf || l.targetD) ? `<p class="sub">Launch: ${lf ? 'forecast ' + esc(ll && +ll !== +lf ? fmt(lf) + ' to ' + fmtD(ll) : fmtD(lf)) : ''}${lf && l.targetD ? '; ' : ''}${l.targetD ? 'your target ' + esc(fmt(l.targetD)) : ''}</p>` : '';
+    return `<div class="grid g3 glance">
+      <div><h4>Done recently</h4>${list(done, '', 'Nothing recorded as finished in the last two weeks.')}</div>
+      <div><h4>Now</h4>${list(now, ' plain', 'Nothing under way.')}${more}</div>
+      <div><h4>Coming up</h4>${list(next, ' plain', 'Nothing starts in the next four weeks.')}${launch}</div>
+    </div>`;
   }
 
   function pageWorkstream(id) {
@@ -1265,7 +1289,7 @@
   };
 
   // The waiting and workstreams lists live on the Status page; their old addresses open it at that section.
-  const SECTIONS = { status: '', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
+  const SECTIONS = { status: '', glance: 'sec-glance', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
 
   function render() {
     let route = (location.hash || '#home').slice(1) || 'home';

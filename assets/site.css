@@ -91,7 +91,13 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 /* Two side by side on every screen, like the progress rings. */
 .g-pair { grid-template-columns: 1fr 1fr; }
 /* Sections the Status page opens at, clear of the sticky menu bar. */
-#sec-waiting, #sec-workstreams { scroll-margin-top: 84px; }
+#sec-glance, #sec-waiting, #sec-workstreams { scroll-margin-top: 84px; }
+/* Done, now and next on the Status page: three columns, one under another on a phone. */
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.glance h4 { margin: 12px 0 0; font-size: 13.5px; color: var(--muted); }
+.glance .done-list .d { flex: 0 0 64px; }
+.done-list.plain .t::before { content: none; }
+.done-list .chip { margin-left: 4px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0; }
 .card h3 { margin: 0 0 2px; font-size: 16.5px; }
 .sub { color: var(--muted); font-size: 13px; }
@@ -296,7 +302,7 @@ details.area[open] > summary .area-top b::before { transform: rotate(90deg); }
   .kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
   .kpi { padding: 12px 14px; } .kpi .v { font-size: 27px; }
   .hero { padding-top: 26px; }
-  .g-half { grid-template-columns: 1fr; }
+  .g-half, .g3 { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .g-pair { gap: 10px; }
