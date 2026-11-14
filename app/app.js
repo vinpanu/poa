@@ -8,6 +8,8 @@
 // Sign-in (design-change card POABUILD-48, 2026-11-14): this site's sign-in can only read; the connector decides
 // that from the session itself (connector version 13). The session lives in this tab only (session storage), signing
 // out ends this session alone, and 30 minutes without use signs out.
+// Second sign-in step (POABUILD-49): once Vince has set up an authenticator (the page at #/security), signing in asks
+// for its code, and the connector refuses a session without it (connector version 14, migration 029).
 
 const SUPABASE_URL = "https://djkomeqozlulwepehoej.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_AsKogB7gcYgWDzNFwekgUw_FJXobyp0"; // public by design; opens nothing in POA
@@ -92,6 +94,10 @@ async function call(name, args) {
   const msg = await res.json();
   if (msg.error) throw new Error(msg.error.message);
   const text = (msg.result && msg.result.content && msg.result.content[0] && msg.result.content[0].text) || "";
+  if (msg.result && msg.result.isError && /second sign-in step/.test(text)) {
+    showCode("This sign-in needs the code from your authenticator app.");
+    throw new Error("Type the code from your authenticator app to go on.");
+  }
   let out;
   try { out = JSON.parse(text); } catch { throw new Error(text || "POA gave an unexpected answer."); }
   if (out && out.status === "error") throw new Error(out.message || "POA couldn't make that report.");
@@ -246,17 +252,107 @@ const PAGES = [
 
 function homePage(body) {
   Views.stopDraw();
+  const secured = h("p", { class: "muted" });
   body.append(h("h1", {}, "Your POA"),
     h("p", { class: "muted" }, "Your reports, from the same records your coach uses. Your plan, today's log and cardio join this site as each part of POA is built."),
-    h("div", { class: "tiles" }, PAGES.map((p) => h("a", { class: "tile", href: "#/" + p.path }, h("strong", {}, p.title), h("span", {}, p.blurb)))));
+    h("div", { class: "tiles" }, PAGES.map((p) => h("a", { class: "tile", href: "#/" + p.path }, h("strong", {}, p.title), h("span", {}, p.blurb)))),
+    secured);
+  secondStepOn().then((on) => {
+    if (on === null) return;
+    secured.append(on ? "Second sign-in step: on. " : "Second sign-in step: not set up yet. ",
+      h("a", { href: "#/security" }, on ? "Details" : "Set it up"));
+  });
 }
+
+// ------------------------------------------------------------------ second sign-in step (POABUILD-49)
+// Supabase adds an authenticator to a POA account only through the app's own steps (enroll, then challenge and
+// verify), so this page is where Vince sets his up. Agents never see the key, the QR code or a code. Once one is
+// verified, every sign-in needs a code (the connector refuses a session without it, migration 029).
+
+async function secondStepOn() {
+  try {
+    const { data, error } = await client.auth.mfa.listFactors();
+    return error ? null : (data.totp || []).length > 0;
+  } catch { return null; }
+}
+
+async function needsCode() {
+  try {
+    const { data, error } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+    return !error && data && data.nextLevel === "aal2" && data.currentLevel !== "aal2";
+  } catch { return false; }
+}
+
+async function enter() {
+  if (await needsCode()) showCode(); else showSite();
+}
+
+function showCode(text) {
+  $("signin").hidden = true;
+  $("code").hidden = false;
+  $("page").textContent = "";
+  $("nav").hidden = true;
+  $("signout").hidden = false;
+  say(text || "", Boolean(text));
+  $("code-input").value = "";
+  $("code-input").focus();
+}
+
+async function securityPage(body) {
+  const { data, error } = await client.auth.mfa.listFactors();
+  if (error) throw new Error("Couldn't check your sign-in steps: " + error.message);
+  if ((data.totp || []).length) {
+    body.append(h("p", {}, "On. POA asks for the 6-digit code from your authenticator app each time you sign in, here and when you connect Claude."));
+    return;
+  }
+  body.append(
+    h("p", {}, "Today one password opens POA. With this step, signing in also needs a 6-digit code from an authenticator app on your phone, such as Google Authenticator or Microsoft Authenticator. It takes about 5 minutes; at your computer is easiest."),
+    h("p", { class: "muted" }, "Nobody else sees the key or the codes, agents included."));
+  const start = h("button", { class: "primary", type: "button" }, "Start");
+  body.append(start);
+  start.addEventListener("click", async () => {
+    start.disabled = true;
+    say("Preparing...");
+    // An unfinished set-up from an earlier try can't be used: clear it before starting again
+    for (const f of (data.all || []).filter((x) => x.factor_type === "totp" && x.status !== "verified")) {
+      await client.auth.mfa.unenroll({ factorId: f.id });
+    }
+    const { data: en, error: e2 } = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "POA authenticator", issuer: "POA" });
+    if (e2 || !en) { start.disabled = false; return say("Couldn't start: " + ((e2 && e2.message) || "no answer") + ". Try again.", true); }
+    say("");
+    start.remove();
+    const code = h("input", { id: "setup-code", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", pattern: "[0-9]{6}", required: true });
+    const form = h("form", {}, h("label", { for: "setup-code" }, "3. Type the 6-digit code your app now shows for POA"), code,
+      h("button", { class: "primary", type: "submit" }, "Turn it on"));
+    body.append(
+      h("ol", { class: "steps" },
+        h("li", {}, "Open your authenticator app and choose to add an account."),
+        h("li", {}, "At your computer, scan this square with your phone. On your phone instead, tap ",
+          h("a", { href: en.totp.uri }, "add to my authenticator app"), ", or type this key into the app: ", h("code", { class: "key" }, en.totp.secret))),
+      h("img", { class: "qr", src: en.totp.qr_code, alt: "Square code for your authenticator app", width: "200", height: "200" }),
+      form);
+    code.focus();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      say("Checking...");
+      const { error: e3 } = await client.auth.mfa.challengeAndVerify({ factorId: en.id, code: code.value.trim() });
+      if (e3) return say("That code didn't work (" + e3.message + "). Type the next code your app shows.", true);
+      body.textContent = "";
+      body.append(
+        h("p", {}, "It's on. From now on POA asks for a code from your authenticator app each time you sign in."),
+        h("p", {}, "One more step, in the Claude app: Settings, Connectors, POA, Disconnect, then Connect, and sign in with your password and a code. Until you do, your coach can't read or save."));
+      say("");
+    });
+  });
+}
+const SECURITY = { path: "security", title: "Second sign-in step", render: securityPage };
 
 // ------------------------------------------------------------------ routing and sign-in
 
 let renderToken = 0;
 async function route() {
   const path = location.hash.replace(/^#\/?/, "");
-  const page = PAGES.find((p) => p.path === path);
+  const page = PAGES.find((p) => p.path === path) || (path === SECURITY.path ? SECURITY : null);
   for (const a of $("nav").querySelectorAll("a")) {
     const here = a.getAttribute("href") === "#/" + path;
     a.setAttribute("aria-current", here ? "page" : "false");
@@ -281,6 +377,7 @@ async function route() {
 }
 
 function showSignIn(text) {
+  $("code").hidden = true;
   $("signin").hidden = false;
   $("page").textContent = "";
   $("nav").hidden = true;
@@ -289,6 +386,7 @@ function showSignIn(text) {
 }
 
 function showSite() {
+  $("code").hidden = true;
   $("signin").hidden = true;
   $("nav").hidden = false;
   $("signout").hidden = false;
@@ -308,7 +406,23 @@ $("signin-form").addEventListener("submit", async (event) => {
   $("password").value = "";
   button.disabled = false;
   if (error) return say("Sign-in failed: " + error.message, true);
-  showSite();
+  await enter();
+});
+$("code-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.target.querySelector("button");
+  button.disabled = true;
+  say("Checking...");
+  try {
+    const { data, error } = await client.auth.mfa.listFactors();
+    const factor = !error && data && (data.totp || [])[0];
+    if (!factor) return say("No authenticator is set up on this account.", true);
+    const { error: e2 } = await client.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $("code-input").value.trim() });
+    if (e2) return say("That code didn't work (" + e2.message + "). Type the next code your app shows.", true);
+    showSite();
+  } finally {
+    button.disabled = false;
+  }
 });
 $("signout").addEventListener("click", () => signOut("Signed out."));
 window.addEventListener("hashchange", () => { if ($("signin").hidden) route(); });
@@ -316,4 +430,4 @@ window.addEventListener("hashchange", () => { if ($("signin").hidden) route(); }
 buildNav();
 Charts.bindTips();
 endOldSession().then(() => client.auth.getSession())
-  .then(({ data }) => (data && data.session ? showSite() : showSignIn()));
+  .then(({ data }) => (data && data.session ? enter() : showSignIn()));

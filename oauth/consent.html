@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-2o9eiOjOxnXT3YviP99xALpgVWVpwDJqx5FMyDrl1Fo='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-JtlAmhRSL/D2qFc+Tl85jpKKdouVVTx63YliiHIthcM='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
 <title>POA sign-in</title>
 <!-- POA connector sign-in page (Build Package M3-PK001, task T08; Registry decision D-0095).
      Supabase Auth's OAuth server sends the browser here with an authorization_id when Claude connects
      to POA. The owner signs in, then allows or refuses. Nothing is stored on the device: the session
-     lives only in this page. The publishable key below is public by design and opens nothing in POA. -->
+     lives only in this page. The publishable key below is public by design and opens nothing in POA.
+     Second sign-in step (POABUILD-49, 2026-11-14): once the owner has set up an authenticator, the page asks
+     for its code before allowing, so Claude's connection carries the second step (the connector needs it). -->
 <style>
 :root { --bg:#f6f6f3; --card:#ffffff; --text:#1d1d1b; --muted:#5d5d58; --line:#d6d6d0; --accent:#1f5f8b; --on-accent:#ffffff; --bad:#a1260d; }
 @media (prefers-color-scheme: dark) {
@@ -45,6 +47,14 @@ button:disabled { opacity: .6; cursor: default; }
       <label for="password">Password</label>
       <input id="password" type="password" autocomplete="current-password" required>
       <button class="primary" type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <section class="card" id="code" hidden>
+    <form id="code-form">
+      <label for="code-input">Code from your authenticator app</label>
+      <input id="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required>
+      <button class="primary" type="submit">Continue</button>
     </form>
   </section>
 
@@ -109,6 +119,28 @@ $("signin-form").addEventListener("submit", async (event) => {
   $("password").value = "";
   button.disabled = false;
   if (error) return say("Sign-in failed: " + error.message, true);
+  const { data: level } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (level && level.nextLevel === "aal2" && level.currentLevel !== "aal2") {
+    $("signin").hidden = true;
+    $("code").hidden = false;
+    $("code-input").focus();
+    return say("");
+  }
+  await showConsent();
+});
+$("code-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.target.querySelector("button");
+  button.disabled = true;
+  say("Checking...");
+  const { data, error } = await client.auth.mfa.listFactors();
+  const factor = !error && data && (data.totp || [])[0];
+  const { error: e2 } = factor
+    ? await client.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $("code-input").value.trim() })
+    : { error: { message: "no authenticator is set up" } };
+  button.disabled = false;
+  if (e2) return say("That code didn't work (" + e2.message + "). Type the next code your app shows.", true);
+  $("code").hidden = true;
   await showConsent();
 });
 $("approve").addEventListener("click", () => decide(true));

@@ -64,6 +64,10 @@ main { max-width: 56rem; margin: 0 auto; padding: 1rem 16px 3rem; }
 label { display: block; font-weight: 600; margin: .75rem 0 .25rem; }
 input, select { font: inherit; padding: .5rem .6rem; border: 1px solid var(--axis); border-radius: 8px; background: var(--page); color: var(--text); max-width: 100%; }
 #signin input { width: 100%; }
+#code input, #setup-code { width: 100%; letter-spacing: .2em; }
+.qr { display: block; width: 200px; height: 200px; margin: 1rem auto; padding: 8px; background: #fff; border-radius: 8px; }
+.key { word-break: break-all; font-size: .95rem; }
+.steps li { margin: .4rem 0; }
 button.primary { width: 100%; font: inherit; font-weight: 600; padding: .65rem 1rem; margin-top: 1rem; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); cursor: pointer; }
 button:disabled { opacity: .6; cursor: default; }
 
