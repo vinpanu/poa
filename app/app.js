@@ -340,7 +340,7 @@ async function securityPage(body) {
       body.textContent = "";
       body.append(
         h("p", {}, "It's on. From now on POA asks for a code from your authenticator app each time you sign in."),
-        h("p", {}, "One more step, in the Claude app: Settings, Connectors, POA, Disconnect, then Connect, and sign in with your password and a code. Until you do, your coach can't read or save."));
+        h("p", {}, "One more step, in the Claude app: open Customize, then Connectors, then POA; disconnect it and connect it again, and sign in with your password and a code. Until you do, your coach can't read or save."));
       say("");
     });
   });
