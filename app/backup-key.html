@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>POA backup key</title>
+<!-- Vince's backup key (design-change card POABUILD-52). The key pair is made in this browser with WebCrypto and is
+     never sent anywhere: connect-src 'none' stops this page from contacting any address. The private key goes only to
+     his password manager; the public key, which can lock backup copies but never open them, goes to his Project
+     Director. Page code only, no data. backup_crypto.js is a byte-for-byte copy of the build's
+     functions/poa-backup/backup_crypto.mjs. -->
+<link rel="stylesheet" href="app.css">
+<script type="module" src="backup-key.js"></script>
+</head>
+<body>
+<main id="main">
+  <section class="card narrow">
+    <h1>Your backup key</h1>
+    <p>This makes the key that locks POA's backup copies, so no one can read them without you. It runs only in this
+      browser: nothing on this page is sent anywhere, and POA never sees your private key.</p>
+    <ol class="steps">
+      <li>Tap <strong>Make my key</strong>.</li>
+      <li>Copy the private key into your password manager, as a new entry called <strong>POA backup private
+        key</strong>. Without it no one, you included, can open the backups, so save it before you go on.</li>
+      <li>Tick the box, then copy the public key and send it to your Project Director. It can lock copies but can't
+        open them.</li>
+    </ol>
+    <p><button id="make" type="button">Make my key</button></p>
+    <div id="private" hidden>
+      <label for="private-key"><strong>Private key: keep it secret</strong></label>
+      <textarea id="private-key" rows="5" readonly></textarea>
+      <p><button id="copy-private" type="button">Copy private key</button></p>
+      <p><label><input id="saved" type="checkbox"> I've saved the private key in my password manager</label></p>
+    </div>
+    <div id="public" hidden>
+      <label for="public-key"><strong>Public key: send this to your Project Director</strong></label>
+      <textarea id="public-key" rows="4" readonly></textarea>
+      <p><button id="copy-public" type="button">Copy public key</button></p>
+    </div>
+    <p class="note">If you close this page before saving the private key, just make a new key. Nothing changes until
+      your Project Director puts the public key in place.</p>
+  </section>
+</main>
+</body>
+</html>
