@@ -4,14 +4,48 @@
 // the same report functions the coach uses, so the website and the conversation never disagree (REQ-RPT-001).
 // Each report has a Graph / Text switch over the same numbers (REQ-RPT-007). The report views themselves are in
 // views.js, shared with the graph card the connector shows in the conversation (task R4). Nothing is stored here
-// except the sign-in session and view preferences in this browser.
+// except view preferences in this browser and, while this tab is open, the sign-in session.
+// Sign-in (design-change card POABUILD-48, 2026-11-14): this site's sign-in can only read; the connector decides
+// that from the session itself (connector version 13). The session lives in this tab only (session storage), signing
+// out ends this session alone, and 30 minutes without use signs out.
 
 const SUPABASE_URL = "https://djkomeqozlulwepehoej.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_AsKogB7gcYgWDzNFwekgUw_FJXobyp0"; // public by design; opens nothing in POA
 const CONNECTOR = SUPABASE_URL + "/functions/v1/poa-connector";
+const AUTH_KEY = "poa-app-auth";
+const IDLE_MINUTES = 30;
 const client = supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: "poa-app-auth" },
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: AUTH_KEY,
+    storage: window.sessionStorage },
 });
+
+// Earlier versions kept the session in local storage, where it outlived the tab: end it on the server, then forget it
+async function endOldSession() {
+  try {
+    if (!localStorage.getItem(AUTH_KEY)) return;
+    const old = supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false, storageKey: AUTH_KEY,
+        storage: window.localStorage },
+    });
+    await old.auth.signOut({ scope: "local" });
+  } catch { /* nothing to end */ }
+  try { localStorage.removeItem(AUTH_KEY); } catch { /* private window */ }
+}
+
+// Signing out ends this session only, never Claude's
+async function signOut(message) {
+  try { await client.auth.signOut({ scope: "local" }); } catch { /* already gone */ }
+  Object.keys(cache).forEach((k) => delete cache[k]);
+  showSignIn(message);
+}
+
+let lastUse = Date.now();
+["pointerdown", "keydown", "scroll", "touchstart"].forEach((t) => window.addEventListener(t, () => { lastUse = Date.now(); }, { passive: true }));
+setInterval(async () => {
+  if (Date.now() - lastUse < IDLE_MINUTES * 60000) return;
+  const { data } = await client.auth.getSession();
+  if (data && data.session) signOut(`Signed out after ${IDLE_MINUTES} minutes without use.`);
+}, 60000);
 const $ = (id) => document.getElementById(id);
 const { h, seg, field, notes } = Views;
 const { addDays, today } = Views.dates;
@@ -50,8 +84,7 @@ async function call(name, args) {
     body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name, arguments: args || {} } }),
   });
   if (res.status === 401) {
-    await client.auth.signOut();
-    showSignIn("Your sign-in ended. Please sign in again.");
+    await signOut("Your sign-in ended. Please sign in again.");
     throw new Error("Please sign in again.");
   }
   if (res.status === 403) throw new Error("This account isn't allowed to use POA.");
@@ -277,9 +310,10 @@ $("signin-form").addEventListener("submit", async (event) => {
   if (error) return say("Sign-in failed: " + error.message, true);
   showSite();
 });
-$("signout").addEventListener("click", async () => { await client.auth.signOut(); Object.keys(cache).forEach((k) => delete cache[k]); showSignIn("Signed out."); });
+$("signout").addEventListener("click", () => signOut("Signed out."));
 window.addEventListener("hashchange", () => { if ($("signin").hidden) route(); });
 
 buildNav();
 Charts.bindTips();
-client.auth.getSession().then(({ data }) => (data && data.session ? showSite() : showSignIn()));
+endOldSession().then(() => client.auth.getSession())
+  .then(({ data }) => (data && data.session ? showSite() : showSignIn()));
