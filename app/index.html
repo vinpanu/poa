@@ -8,7 +8,7 @@
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
 <title>POA</title>
-<!-- Vince's private POA website (Jira PS-046 revision 5; Build Package M3-PK003, task R5; technical decision M3-TD026).
+<!-- Vince's private POA website (Jira PS-046 revision 5, REQ-WEB; Build Packages M3-PK003, task R5, and M3-PK004; M3-TD026).
      Page code only: no health data is in any file or address here. After Vince signs in with his own POA account,
      the page reads his reports through the POA connector's read actions, the same ones the coach uses. -->
 <link rel="stylesheet" href="app.css">
@@ -16,7 +16,6 @@
 <body>
 <header class="top">
   <a class="brand" href="#/">POA</a>
-  <nav id="nav" class="nav" aria-label="Pages" hidden></nav>
   <button id="signout" class="link" type="button" hidden>Sign out</button>
 </header>
 
@@ -44,11 +43,15 @@
   <div id="page"></div>
   <p id="message" class="muted" role="status" aria-live="polite"></p>
 </main>
+<nav id="tabs" class="tabs" aria-label="Sections" hidden></nav>
+<div id="sheetbg" class="sheet-bg" hidden></div>
+<section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-h" hidden></section>
 <div id="tip" class="tip" role="tooltip" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js" integrity="sha384-BWcjm9OdFth9TbhCxZPdm+gAOUMAzQy9nmTs12ioXdCcbVnJaPMn+fMUoQCLt60R" crossorigin="anonymous"></script>
 <script src="charts.js"></script>
 <script src="views.js"></script>
+<script src="home.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -10,6 +10,11 @@
 // out ends this session alone, and 30 minutes without use signs out.
 // Second sign-in step (POABUILD-49): once Vince has set up an authenticator (the page at #/security), signing in asks
 // for its code, and the connector refuses a session without it (connector version 14, migration 029).
+// Home base (Build Package M3-PK004, tasks P3 and P4; Jira REQ-WEB, 2026-11-16): the home page opens on Today, then This
+// week, then Reports and History (REQ-WEB-001); a bar at the bottom of every page leads to Home, Reports and History
+// (REQ-WEB-008); History opens any day as Today shows it (REQ-WEB-007); Reports puts nutrition first (REQ-WEB-013) and
+// every report offers a day, 1 week, 1 month, 3 months, 6 months and 1 year ending today, with arrows (REQ-WEB-011).
+// Every page reads afresh each time it opens, so it shows everything logged up to that moment (REQ-WEB-009).
 
 const SUPABASE_URL = "https://djkomeqozlulwepehoej.supabase.co";
 const PUBLISHABLE_KEY = "sb_publishable_AsKogB7gcYgWDzNFwekgUw_FJXobyp0"; // public by design; opens nothing in POA
@@ -61,16 +66,53 @@ function setPref(key, value) {
   try { localStorage.setItem("poa-app-" + key, JSON.stringify(value)); } catch { /* private window: keep defaults */ }
 }
 
-// ------------------------------------------------------------------ dates
+// ------------------------------------------------------------------ report periods (REQ-WEB-011)
+// Six periods, each ending today: a day is today, the others the last 7, 30, 90, 180 or 365 days. The arrows step to
+// the period of the same length just before or after, never past today; custom dates cover anything else.
 
-const PERIODS = [["4w", "Last 4 weeks", 28], ["8w", "Last 8 weeks", 56], ["12w", "Last 12 weeks", 84],
-  ["6m", "Last 6 months", 182], ["1y", "Last year", 365], ["custom", "Custom dates", 0]];
+const PERIODS = [["day", "Day", 1], ["1w", "1 week", 7], ["1m", "1 month", 30], ["3m", "3 months", 90],
+  ["6m", "6 months", 180], ["1y", "1 year", 365], ["custom", "Custom", 0]];
+let periodEnd = null; // where the arrows have moved the period's end; null is today, where every visit starts
+
+const ymdParts = (s) => { const [y, m, d] = s.split("-").map(Number); return [y, m - 1, d]; };
+const daysBetween = (a, b) => Math.round((Date.UTC(...ymdParts(b)) - Date.UTC(...ymdParts(a))) / 864e5);
 
 function period() {
-  const p = pref("period", "4w");
-  if (p === "custom") return { from: pref("from", addDays(today(), -27)), to: pref("to", today()) };
-  const days = (PERIODS.find((x) => x[0] === p) || PERIODS[0])[2];
-  return { from: addDays(today(), -(days - 1)), to: today() };
+  let per = pref("period", "1m");
+  if (!PERIODS.some((x) => x[0] === per)) per = "1m";
+  if (per === "custom") {
+    let from = pref("from", addDays(today(), -29));
+    let to = pref("to", today());
+    if (to > today()) to = today();
+    if (from > to) [from, to] = [to, from];
+    return { per, from, to, len: daysBetween(from, to) + 1 };
+  }
+  const len = PERIODS.find((x) => x[0] === per)[2];
+  const end = periodEnd && periodEnd < today() ? periodEnd : today();
+  return { per, from: addDays(end, -(len - 1)), to: end, len };
+}
+
+function shiftPeriod(dir) {
+  const p = period();
+  if (p.per === "custom") {
+    let from = addDays(p.from, dir * p.len);
+    let to = addDays(p.to, dir * p.len);
+    if (to > today()) { to = today(); from = addDays(to, -(p.len - 1)); }
+    setPref("from", from);
+    setPref("to", to);
+  } else {
+    const end = addDays(p.to, dir * p.len);
+    periodEnd = end >= today() ? null : end;
+  }
+}
+
+function rangeLabel(p) {
+  const { MON, parse } = Views.dates;
+  const md = (s) => { const d = parse(s); return MON[d.getMonth()] + " " + d.getDate(); };
+  const y = (s) => s.slice(0, 4);
+  if (p.len === 1) return (p.to === today() ? "Today, " : "") + Pages.dayShort(p.to) + (y(p.to) !== y(today()) ? ", " + y(p.to) : "");
+  if (y(p.from) !== y(p.to)) return md(p.from) + ", " + y(p.from) + " – " + md(p.to) + ", " + y(p.to);
+  return md(p.from) + " – " + md(p.to) + (y(p.to) !== y(today()) ? ", " + y(p.to) : "");
 }
 
 // ------------------------------------------------------------------ calling POA
@@ -123,16 +165,21 @@ async function micronutrients() {
 // ------------------------------------------------------------------ controls
 
 function periodControls(rerender) {
-  const p = pref("period", "4w");
-  const sel = h("select", { onchange: (e) => { setPref("period", e.target.value); rerender(); } },
-    PERIODS.map(([v, t]) => h("option", { value: v, selected: v === p }, t)));
-  const out = [field("Period", sel)];
-  if (p === "custom") {
-    const { from, to } = period();
-    out.push(field("From", h("input", { type: "date", value: from, max: today(), onchange: (e) => { if (e.target.value) { setPref("from", e.target.value); rerender(); } } })));
-    out.push(field("To", h("input", { type: "date", value: to, max: today(), onchange: (e) => { if (e.target.value) { setPref("to", e.target.value); rerender(); } } })));
+  const p = period();
+  const chips = h("div", { class: "pers", role: "group", "aria-label": "Period" }, PERIODS.map(([v, t]) =>
+    h("button", { type: "button", class: "per", "aria-pressed": String(v === p.per),
+      onclick: () => { setPref("period", v); periodEnd = null; rerender(); } }, t)));
+  const back = h("button", { type: "button", class: "arrow", "aria-label": "Previous period", title: "Previous period",
+    onclick: () => { shiftPeriod(-1); rerender(); } }, "‹");
+  const fwd = h("button", { type: "button", class: "arrow", "aria-label": "Next period", title: "Next period", disabled: p.to >= today(),
+    onclick: () => { shiftPeriod(1); rerender(); } }, "›");
+  const out = h("div", { class: "period" }, chips, h("div", { class: "rangebar" }, back, h("span", { class: "range-t" }, rangeLabel(p)), fwd));
+  if (p.per === "custom") {
+    out.append(h("div", { class: "custom" },
+      field("From", h("input", { type: "date", value: p.from, max: today(), onchange: (e) => { if (e.target.value) { setPref("from", e.target.value); rerender(); } } })),
+      field("To", h("input", { type: "date", value: p.to, max: today(), onchange: (e) => { if (e.target.value) { setPref("to", e.target.value); rerender(); } } }))));
   }
-  return out;
+  return [out];
 }
 
 function viewSwitch(rerender) {
@@ -240,28 +287,76 @@ async function nutritionLiftsPage(body, rerender) {
   Views.show.nutrition_vs_performance(body, r, view());
 }
 
-const PAGES = [
-  { path: "nutrition", title: "Nutrition", blurb: "Calories, protein, carbs, fat and any micronutrient, by day, week or month", render: nutritionPage },
+// The reports, nutrition first (REQ-WEB-013); each keeps its graph-or-text switch (REQ-RPT-007)
+const NUTRITION_REPORTS = [
+  { path: "nutrition", title: "Nutrients over time", blurb: "Calories, protein, carbs, fat and any micronutrient, by day, week or month", render: nutritionPage },
   { path: "sources", title: "Where it comes from", blurb: "The foods that gave you the most of a nutrient", render: sourcesPage },
+];
+const EXERCISE_REPORTS = [
   { path: "progress", title: "Lift progress", blurb: "Your best set in each workout, and weight moved", render: progressPage },
   { path: "records", title: "Personal records", blurb: "Heaviest weight for each number of reps, and most reps at each weight", render: recordsPage },
   { path: "sets", title: "Weekly sets", blurb: "Working sets per week by muscle group or exercise", render: setsPage },
   { path: "workouts", title: "Workouts", blurb: "Workouts per week and how long they took", render: workoutsPage },
   { path: "nutrition-lifts", title: "Nutrition and lifts", blurb: "A nutrient's weekly average beside your best set", render: nutritionLiftsPage },
 ];
+const PAGES = [...NUTRITION_REPORTS, ...EXERCISE_REPORTS];
+const tiles = (list) => h("div", { class: "tiles" }, list.map((p) => h("a", { class: "tile", href: "#/r/" + p.path }, h("strong", {}, p.title), h("span", {}, p.blurb))));
+const openFood = (entryId) => Pages.foodSheet(entryId, call);
 
-function homePage(body) {
-  Views.stopDraw();
-  const secured = h("p", { class: "muted" });
-  body.append(h("h1", {}, "Your POA"),
-    h("p", { class: "muted" }, "Your reports, from the same records your coach uses. Your plan, today's log and cardio join this site as each part of POA is built."),
-    h("div", { class: "tiles" }, PAGES.map((p) => h("a", { class: "tile", href: "#/" + p.path }, h("strong", {}, p.title), h("span", {}, p.blurb)))),
-    secured);
+// Home (REQ-WEB-001): Today, then This week, then Reports and History. No Plan section until the coach makes plans.
+async function homePage(body) {
+  const todayBox = h("div", {});
+  const weekBox = h("div", {});
+  body.append(todayBox, weekBox, h("div", { class: "tiles" },
+    h("a", { class: "tile", href: "#/reports" }, h("strong", {}, "Reports"), h("span", {}, "Nutrition, then exercise, for any period")),
+    h("a", { class: "tile", href: "#/history" }, h("strong", {}, "History"), h("span", {}, "Any past day, as Today shows it"))));
+  const secured = h("p", { class: "muted small" });
+  body.append(secured);
   secondStepOn().then((on) => {
     if (on === null) return;
     secured.append(on ? "Second sign-in step: on. " : "Second sign-in step: not set up yet. ",
       h("a", { href: "#/security" }, on ? "Details" : "Set it up"));
   });
+  const [d, w] = await Promise.all([call("day", {}), call("week", {})]);
+  Pages.dayView(todayBox, d, { live: true, openFood });
+  Pages.weekView(weekBox, w);
+}
+
+// History (REQ-WEB-007): any day back to the first log, from a calendar or the last 7 days, a day at a time
+async function historyPage(body, date) {
+  const t = today();
+  const d = date && date <= t ? date : addDays(t, -1);
+  const go = (x) => { location.hash = "#/day/" + x; };
+  const chips = [];
+  for (let k = 7; k >= 1; k--) {
+    const x = addDays(t, -k);
+    const parts = Pages.dayShort(x).split(" ");
+    chips.push(h("a", { class: "per", href: "#/day/" + x, "aria-current": x === d ? "true" : null }, parts[0] + " " + parts[2]));
+  }
+  body.append(h("section", { class: "card" },
+    h("div", { class: "rangebar" },
+      h("button", { type: "button", class: "arrow", "aria-label": "Previous day", title: "Previous day", onclick: () => go(addDays(d, -1)) }, "‹"),
+      h("span", { class: "range-t" }, Pages.dayLong(d) + (d.slice(0, 4) !== t.slice(0, 4) ? ", " + d.slice(0, 4) : "")),
+      h("button", { type: "button", class: "arrow", "aria-label": "Next day", title: "Next day", disabled: d >= t, onclick: () => go(addDays(d, 1)) }, "›")),
+    h("div", { class: "pers", role: "group", "aria-label": "Last 7 days" }, chips),
+    field("Or pick a day", h("input", { type: "date", value: d, max: t, onchange: (e) => { if (e.target.value) go(e.target.value); } }))));
+  const r = await call("day", { date: d });
+  Pages.dayView(body, r, { live: d === t, openFood });
+}
+
+// Reports (REQ-WEB-013): nutrition first, then exercise. Nutrition opens on the period's summary (task P4).
+let reportSection = "nut";
+async function reportsPage(body, rerender) {
+  body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition or exercise")));
+  if (reportSection === "ex") {
+    body.append(h("p", { class: "muted small" }, "Each report covers any period, with a graph or text."), tiles(EXERCISE_REPORTS));
+    return;
+  }
+  body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender)));
+  const box = h("div", {});
+  body.append(box);
+  await Pages.nutritionSummary(box, period(), call, pref("view", "graph"));
+  body.append(h("h2", {}, "More nutrition reports"), tiles(NUTRITION_REPORTS));
 }
 
 // ------------------------------------------------------------------ second sign-in step (POABUILD-49)
@@ -291,7 +386,7 @@ function showCode(text) {
   $("signin").hidden = true;
   $("code").hidden = false;
   $("page").textContent = "";
-  $("nav").hidden = true;
+  $("tabs").hidden = true;
   $("signout").hidden = false;
   say(text || "", Boolean(text));
   $("code-input").value = "";
@@ -350,26 +445,47 @@ const SECURITY = { path: "security", title: "Second sign-in step", render: secur
 // ------------------------------------------------------------------ routing and sign-in
 
 let renderToken = 0;
-async function route() {
+function parseRoute() {
   const path = location.hash.replace(/^#\/?/, "");
-  const page = PAGES.find((p) => p.path === path) || (path === SECURITY.path ? SECURITY : null);
-  for (const a of $("nav").querySelectorAll("a")) {
-    const here = a.getAttribute("href") === "#/" + path;
-    a.setAttribute("aria-current", here ? "page" : "false");
-    if (here) a.scrollIntoView({ block: "nearest", inline: "center" });
-  }
+  let m;
+  if (!path) return { kind: "home" };
+  if (path === "reports") return { kind: "reports" };
+  if (path === "history") return { kind: "history" };
+  if ((m = /^day\/(\d{4}-\d{2}-\d{2})$/.exec(path))) return { kind: "history", date: m[1] };
+  if (path === SECURITY.path) return { kind: "security" };
+  const name = (m = /^r\/([a-z-]+)$/.exec(path)) ? m[1] : path; // the old addresses (#/nutrition) still open their report
+  const page = PAGES.find((p) => p.path === name);
+  return page ? { kind: "report", page } : { kind: "home" };
+}
+
+function setTabs(kind) {
+  const here = kind === "report" ? "reports" : kind;
+  for (const a of $("tabs").querySelectorAll("a")) a.setAttribute("aria-current", a.dataset.tab === here ? "page" : "false");
+}
+
+async function route() {
+  Pages.closeSheet();
+  const rt = parseRoute();
+  setTabs(rt.kind);
   const body = $("page");
   body.textContent = "";
   say("");
-  if (!page) return homePage(body);
   Views.stopDraw();
   const mine = ++renderToken;
   const inner = h("div", {});
   const rerender = () => route();
-  body.append(h("h1", {}, page.title), inner);
+  if (rt.kind === "report") body.append(h("p", { class: "crumb" }, h("a", { href: "#/reports" }, "‹ Reports")), h("h1", {}, rt.page.title));
+  else if (rt.kind === "reports") body.append(h("h1", {}, "Reports"));
+  else if (rt.kind === "history") body.append(h("h1", {}, "History"));
+  else if (rt.kind === "security") body.append(h("h1", {}, SECURITY.title));
+  body.append(inner);
   say("Loading...");
   try {
-    await page.render(inner, rerender);
+    if (rt.kind === "home") await homePage(inner);
+    else if (rt.kind === "history") await historyPage(inner, rt.date);
+    else if (rt.kind === "reports") await reportsPage(inner, rerender);
+    else if (rt.kind === "security") await securityPage(inner);
+    else await rt.page.render(inner, rerender);
     if (mine === renderToken) say("");
   } catch (err) {
     if (mine === renderToken) say(err.message || String(err), true);
@@ -380,7 +496,7 @@ function showSignIn(text) {
   $("code").hidden = true;
   $("signin").hidden = false;
   $("page").textContent = "";
-  $("nav").hidden = true;
+  $("tabs").hidden = true;
   $("signout").hidden = true;
   say(text || "", Boolean(text));
 }
@@ -388,13 +504,31 @@ function showSignIn(text) {
 function showSite() {
   $("code").hidden = true;
   $("signin").hidden = true;
-  $("nav").hidden = false;
+  $("tabs").hidden = false;
   $("signout").hidden = false;
   route();
 }
 
+// The bar at the bottom of every page (REQ-WEB-008): Home, Reports and History; Plan joins once the coach makes plans
 function buildNav() {
-  $("nav").append(...PAGES.map((p) => h("a", { href: "#/" + p.path }, p.title)));
+  const NS = "http://www.w3.org/2000/svg";
+  const icon = (d) => {
+    const s = document.createElementNS(NS, "svg");
+    s.setAttribute("viewBox", "0 0 24 24");
+    s.setAttribute("aria-hidden", "true");
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d);
+    s.append(p);
+    return s;
+  };
+  const tabs = [["home", "#/", "Home", "M4 11l8-7 8 7v9h-5v-6H9v6H4z"], ["reports", "#/reports", "Reports", "M5 20V11M12 20V5M19 20v-7"],
+    ["history", "#/history", "History", "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM12 8v4l3 2"]];
+  $("tabs").append(h("div", { class: "tabs-in" }, tabs.map(([k, href, text, d]) => {
+    const a = h("a", { href }, icon(d), h("span", {}, text));
+    a.dataset.tab = k;
+    return a;
+  })));
+  $("sheetbg").addEventListener("click", () => Pages.closeSheet());
 }
 
 $("signin-form").addEventListener("submit", async (event) => {
@@ -425,7 +559,7 @@ $("code-form").addEventListener("submit", async (event) => {
   }
 });
 $("signout").addEventListener("click", () => signOut("Signed out."));
-window.addEventListener("hashchange", () => { if ($("signin").hidden) route(); });
+window.addEventListener("hashchange", () => { if ($("signin").hidden && $("code").hidden) route(); });
 
 buildNav();
 Charts.bindTips();

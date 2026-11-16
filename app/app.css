@@ -126,3 +126,115 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.missing td { color: var(--text-2); }
 td:first-child { min-width: 7.5rem; }
 .table-wrap { overflow-x: auto; }
+
+/* ---------- Home base: Today, This week, History, the food detail and the bottom bar (Build Package M3-PK004) ---------- */
+:root { --series-3: #8a5cd1; --good: #1d8048; --warn: #9a5c00; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --series-3: #a684e6; --good: #55c784; --warn: #e3a645; } }
+:root[data-theme="dark"] { --series-3: #a684e6; --good: #55c784; --warn: #e3a645; }
+
+#signout { margin-left: auto; }
+#main { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)); max-width: 44rem; }
+.tiny { font-size: .78rem; }
+.crumb { margin: 0 0 .25rem; font-size: .9rem; }
+.card-h { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.card-h h2 { margin: 0; font-size: 1.05rem; }
+.card-h .right { margin-left: auto; }
+.card > * + * { margin-top: .6rem; }
+.big { font-size: 2rem; font-weight: 750; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.unit { font-weight: 600; color: var(--text-2); }
+.kcal-row { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.na { color: var(--muted); }
+.pill { font-size: .75rem; font-weight: 650; padding: .1rem .5rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.p-ok { color: var(--good); } .p-todo { color: var(--warn); } .p-nd { color: var(--text-2); } .p-info { color: var(--accent); }
+
+/* the split of calories as one bar (REQ-WEB-015) */
+.macro { display: grid; gap: .45rem; }
+.stack { display: flex; height: .75rem; border-radius: 999px; overflow: hidden; background: var(--grid); }
+.stack i { display: block; height: 100%; }
+.m0 { background: var(--series-1); } .m1 { background: var(--series-2); } .m2 { background: var(--series-3); }
+.legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .88rem; color: var(--text-2); }
+.legend b { color: var(--text); }
+.swatch { display: inline-block; width: .65rem; height: .65rem; border-radius: 50%; margin-right: .35rem; }
+
+/* rows that open */
+.list { display: grid; }
+details.row { border-top: 1px solid var(--grid); }
+details.row:first-child { border-top: 0; }
+details.row > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: .6rem; padding: .6rem 0; }
+details.row > summary::-webkit-details-marker { display: none; }
+details.row > summary::after { content: ""; width: .45rem; height: .45rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); flex: none; margin-left: .2rem; }
+details.row[open] > summary::after { transform: rotate(-135deg); }
+.s-main { flex: 1; min-width: 0; display: grid; gap: .1rem; }
+.s-title { font-weight: 650; }
+.s-sub { font-size: .82rem; color: var(--text-2); }
+.s-right { font-weight: 650; white-space: nowrap; text-align: right; }
+.inner { padding: 0 0 .6rem .6rem; border-left: 2px solid var(--grid); margin-left: .2rem; display: grid; gap: .4rem; min-width: 0; }
+button.food { display: grid; grid-template-columns: minmax(0, 1fr) auto .8rem; gap: .5rem; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: none; border: 0; border-top: 1px solid var(--grid); padding: .5rem 0; cursor: pointer; }
+.foods button.food:first-child { border-top: 0; }
+.f-n { display: grid; gap: .05rem; min-width: 0; }
+.f-s { font-size: .78rem; color: var(--text-2); }
+.f-k { font-weight: 650; }
+.chev { color: var(--muted); font-size: 1.2rem; }
+ol.sets { margin: 0; padding-left: 1.2rem; font-size: .9rem; }
+ol.sets li { margin: .15rem 0; }
+ul.plain { margin: 0; padding-left: 1.1rem; font-size: .9rem; }
+.workout + .workout { border-top: 1px solid var(--grid); padding-top: .5rem; }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: .88rem; margin: .4rem 0; }
+.hint { font-size: .84rem; color: var(--text-2); background: var(--surface); border: 1px dashed var(--axis); border-radius: 10px; padding: .55rem .7rem; margin-top: 1rem; }
+table.nut tr.grp th { padding-top: .7rem; color: var(--text); font-size: .85rem; }
+
+/* This week */
+.days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .3rem; }
+.day { display: grid; justify-items: center; gap: .1rem; padding: .35rem 0; border: 1px solid var(--grid); border-radius: 10px; text-decoration: none; color: var(--text); background: var(--page); }
+.day.now { border-color: var(--accent); }
+.day.come { color: var(--muted); }
+.dd { font-size: .72rem; color: var(--text-2); }
+.dn { font-weight: 650; }
+.marks { display: flex; gap: .2rem; height: .7rem; align-items: center; }
+.fm { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; border: 1.5px solid var(--good); }
+.fm.ok { background: var(--good); }
+.fm.part { background: linear-gradient(90deg, var(--good) 50%, transparent 50%); }
+.fm.none { border-color: var(--axis); }
+.fm.come { border-color: var(--grid); }
+.wm { display: inline-block; width: .7rem; height: .35rem; border-radius: 2px; background: var(--series-1); }
+.keyline i { vertical-align: middle; }
+.figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: .5rem; }
+.fig { display: grid; gap: .1rem; }
+.fig .label { font-size: .75rem; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+
+/* report periods (REQ-WEB-011) */
+.controls .period { flex: 1 1 100%; display: grid; gap: .5rem; }
+.pers { display: flex; flex-wrap: wrap; gap: .35rem; }
+.per { font: inherit; font-size: .85rem; padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--axis); background: var(--page); color: var(--text-2); cursor: pointer; text-decoration: none; }
+.per[aria-pressed="true"], .per[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+.rangebar { display: flex; align-items: center; gap: .5rem; }
+.range-t { flex: 1; text-align: center; font-weight: 650; }
+.arrow { width: 2.5rem; height: 2.5rem; flex: none; border-radius: 50%; border: 1px solid var(--axis); background: var(--page); color: var(--accent); font-size: 1.35rem; line-height: 1; cursor: pointer; }
+.arrow:disabled { color: var(--muted); opacity: .45; cursor: default; }
+.custom { display: flex; gap: .75rem; flex-wrap: wrap; }
+.custom .field { display: flex; flex-direction: column; }
+.custom .field > span { font-size: .8rem; color: var(--text-2); }
+.seg-wide .seg { display: flex; width: 100%; }
+.seg-wide .seg button { flex: 1; padding: .55rem; font-size: 1rem; }
+.tf { display: grid; gap: .55rem; }
+.tf-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .5rem; font-size: .9rem; }
+.tf-v { font-weight: 600; white-space: nowrap; }
+.tf-bar { grid-column: 1 / -1; height: .4rem; background: var(--grid); border-radius: 999px; overflow: hidden; }
+.tf-bar i { display: block; height: 100%; background: var(--series-2); }
+
+/* the food detail, sliding over the page */
+.sheet-bg { position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, .4); }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; max-height: 88vh; overflow: auto; background: var(--surface); border-radius: 16px 16px 0 0;
+  padding: 0 16px calc(1rem + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -6px 24px rgba(0, 0, 0, .25); }
+.sheet-in { max-width: 44rem; margin: 0 auto; display: grid; gap: .7rem; }
+.sheet-h { position: sticky; top: 0; z-index: 1; background: var(--surface); display: flex; align-items: flex-start; gap: .6rem; padding: .9rem 0 .6rem; border-bottom: 1px solid var(--grid); }
+.sheet-h h2 { flex: 1; margin: 0; }
+.btn { font: inherit; font-size: .9rem; border: 1px solid var(--axis); background: var(--page); color: var(--text); border-radius: 8px; padding: .35rem .8rem; cursor: pointer; }
+
+/* the bar at the bottom of every page (REQ-WEB-008) */
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--grid); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.tabs-in { max-width: 44rem; margin: 0 auto; display: flex; }
+.tabs a { flex: 1; display: grid; justify-items: center; gap: .1rem; padding: .45rem 0 .5rem; text-decoration: none; color: var(--muted); font-size: .75rem; font-weight: 600; }
+.tabs svg { width: 1.45rem; height: 1.45rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabs a[aria-current="page"] { color: var(--accent); }
