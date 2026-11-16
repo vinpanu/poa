@@ -142,11 +142,13 @@ const Pages = (() => {
       h("p", { class: "tiny muted" }, "Tap a meal to see its foods, and a food to see every nutrient."));
   }
 
+  // A set's says text is the coach's read-back ("185 lb, bar included, 8 reps, 2 in reserve"); add only what it lacks
+  const rirText = (s) => (s.rir === null || s.rir === undefined || /in reserve/.test(s.says || "") ? ""
+    : " · " + s.rir + " in reserve") + (s.rir_basis === "assumed" ? " (assumed)" : "");
   function setLine(s, i) {
-    const rir = s.rir === null || s.rir === undefined ? "" : " · " + s.rir + " in reserve" + (s.rir_basis === "assumed" ? " (assumed)" : "");
     const kind = s.set_kind === "warm_up" ? "Warm-up" : "Set " + i;
-    const tech = s.technique === "drop" ? " · drop set, counts as " + s.counts_as : s.technique === "rest_pause" ? " · rest-pause" : "";
-    return h("li", {}, h("span", { class: "muted" }, kind + ": "), (s.says || "") + rir + tech + (s.with_partials ? " · with partials" : ""));
+    const tech = s.technique === "rest_pause" && !/rest/i.test(s.says || "") ? " · rest-pause" : "";
+    return h("li", {}, h("span", { class: "muted" }, kind + ": "), (s.says || "") + rirText(s) + tech + (s.with_partials && !/partial/i.test(s.says || "") ? " · with partials" : ""));
   }
 
   function workoutCard(d) {
@@ -289,7 +291,7 @@ const Pages = (() => {
     const setList = (sets) => h("ol", { class: "sets numbered" }, (sets || []).map((s) => h("li", {},
       h("a", { href: "#/day/" + s.date }, dow(s.date)), " · " + cap(s.exercise) + " · " + s.says
         + (s.drop_part ? " (drop " + s.drop_part + ")" : "")
-        + (s.rir === null || s.rir === undefined ? "" : " · " + s.rir + " in reserve" + (s.rir_basis === "assumed" ? " (assumed)" : "")))));
+        + rirText(s))));
     const groups = new Map();
     for (const g of tw.working_sets.by_muscle_group || []) groups.set(g.muscle_group, { now: g, last: null });
     for (const g of lw.working_sets.by_muscle_group || []) groups.set(g.muscle_group, { ...(groups.get(g.muscle_group) || { now: null }), last: g });
