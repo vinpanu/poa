@@ -142,9 +142,10 @@ const Pages = (() => {
       h("p", { class: "tiny muted" }, "Tap a meal to see its foods, and a food to see every nutrient."));
   }
 
-  // A set's says text is the coach's read-back ("185 lb, bar included, 8 reps, 2 in reserve"); add only what it lacks
+  // A set's says text is the coach's read-back ("185 lb, bar included, 8 reps, 2 in reserve", and "(assumed, your
+  // default)" when the reps in reserve were assumed); add only what it lacks (CR1-D010, POABUILD-67)
   const rirText = (s) => (s.rir === null || s.rir === undefined || /in reserve/.test(s.says || "") ? ""
-    : " · " + s.rir + " in reserve") + (s.rir_basis === "assumed" ? " (assumed)" : "");
+    : " · " + s.rir + " in reserve") + (s.rir_basis === "assumed" && !/assumed/i.test(s.says || "") ? " (assumed)" : "");
   function setLine(s, i) {
     const kind = s.set_kind === "warm_up" ? "Warm-up" : "Set " + i;
     const tech = s.technique === "rest_pause" && !/rest/i.test(s.says || "") ? " · rest-pause" : "";
@@ -160,7 +161,10 @@ const Pages = (() => {
     return card("Workout", null, ws.map((w) => {
       const head = [w.label, w.started ? to12(w.started) : w.activity_time ? to12(w.activity_time) : null,
         w.length_min ? w.length_min + " min" : null, plural(w.working_sets, "working set")].filter(Boolean).join(" · ");
-      return h("div", { class: "workout" }, h("p", { class: "small muted" }, head + (w.finished ? "" : " · still open")),
+      // Only a timed workout can be open, waiting for "end workout" or the coach's closing question (REQ-WKT-006, 008);
+      // one logged afterwards has no clock, so it is marked as reported later instead (REQ-LOG-006; CR1-D012, POABUILD-69)
+      const state = w.timed && !w.finished ? " · still open" : !w.timed && w.reported_later ? " · reported later" : "";
+      return h("div", { class: "workout" }, h("p", { class: "small muted" }, head + state),
         h("div", { class: "list" }, (w.exercises || []).map((x) => {
           let n = 0;
           const working = (x.sets || []).filter((s) => s.set_kind !== "warm_up").reduce((a, s) => a + (s.counts_as || 0), 0);
@@ -217,14 +221,15 @@ const Pages = (() => {
     const src = x.source === "usda" ? "Values from USDA FoodData Central." : x.source === "his_values" ? "Values from your own entry (a label or MyNetDiary)."
       : x.source === "estimate" ? "Your own estimate: calories and macros only." : "";
     const raw = x.preparation === "cooked" ? "cooked weight" : "raw weight";
-    inner.append(
+    // append() writes a null as the word "null", so the parts a food may lack (a note, macros) are left out (CR1-D011, POABUILD-68)
+    inner.append(...[
       h("p", { class: "s-sub" }, "Meal " + x.meal_number + " · " + (x.time_said || "time not given") + " · " + dayShort(x.activity_date)),
       h("div", { class: "kcal-row" }, h("span", { class: "big" }, x.calories === null ? "–" : kcal(x.calories)), h("span", { class: "unit" }, "kcal"),
         h("span", { class: "muted small" }, cap(x.says || "") + (x.grams ? " (" + grams(x.grams) + " g, " + raw + ")" : ""))),
       h("p", { class: "tiny muted" }, src + " A value the food data doesn't have shows as n/a, never zero."),
       macroBar(x.protein_g, x.carbohydrate_g, x.fat_g),
       x.note ? h("p", { class: "small muted" }, x.note.replace(/^Vince's own/, "Your own")) : null,
-      nutrientTable(x.nutrients, "Amount", { atLeast: false }));
+      nutrientTable(x.nutrients, "Amount", { atLeast: false })].filter((n) => n !== null && n !== undefined));
     const others = x.other_nutrients || [];
     if (others.length) {
       inner.append(h("details", { class: "more" }, h("summary", {}, "Everything else in the food data (" + others.length + ")"),
