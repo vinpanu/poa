@@ -5,14 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-JtlAmhRSL/D2qFc+Tl85jpKKdouVVTx63YliiHIthcM='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-Mt9E3WomIn0Wh0SN2BK/O71hLl7ARII53FFHMELZ/q4='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
 <title>POA sign-in</title>
 <!-- POA connector sign-in page (Build Package M3-PK001, task T08; Registry decision D-0095).
      Supabase Auth's OAuth server sends the browser here with an authorization_id when Claude connects
      to POA. The owner signs in, then allows or refuses. Nothing is stored on the device: the session
      lives only in this page. The publishable key below is public by design and opens nothing in POA.
      Second sign-in step (POABUILD-49, 2026-11-14): once the owner has set up an authenticator, the page asks
-     for its code before allowing, so Claude's connection carries the second step (the connector needs it). -->
+     for its code before allowing, so Claude's connection carries the second step (the connector needs it).
+     Since 2026-11-17 (POABUILD-49, migration 040, connector version 18): Supabase's sign-in server marks Claude's token
+     one-step whatever this page did, so after the code and his Allow the page vouches for this request, with the code
+     Allow handed back and the owner's own two-step session (poa-connector/trust-claude), before it returns to Claude,
+     and POA trusts the one Claude connection that code produces (independent review, 2026-11-19, fix b). Allow and
+     Refuse pass skipBrowserRedirect, so the library never goes to Claude on its own: only this page returns there,
+     once, after the vouch (readiness architect, test copy, 2026-11-19). -->
 <style>
 :root { --bg:#f6f6f3; --card:#ffffff; --text:#1d1d1b; --muted:#5d5d58; --line:#d6d6d0; --accent:#1f5f8b; --on-accent:#ffffff; --bad:#a1260d; }
 @media (prefers-color-scheme: dark) {
@@ -75,7 +81,9 @@ const PUBLISHABLE_KEY = "sb_publishable_AsKogB7gcYgWDzNFwekgUw_FJXobyp0";
 const client = supabase.createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
+const CONNECTOR = SUPABASE_URL + "/functions/v1/poa-connector";
 const authorizationId = new URLSearchParams(location.search).get("authorization_id");
+let secondStepDone = false;   // set once his code from the authenticator is accepted
 const $ = (id) => document.getElementById(id);
 
 function say(text, bad) {
@@ -88,25 +96,69 @@ function goBack(url) {
   location.assign(url);
 }
 
+// The code Claude gets back, from the return address Supabase hands the page (in its query, or in its fragment)
+function codeIn(url) {
+  try {
+    const u = new URL(url, location.href);
+    return u.searchParams.get("code") || new URLSearchParams(u.hash.replace(/^#[^?]*\??/, "")).get("code");
+  } catch (e) {
+    return null;
+  }
+}
+
+// Back to Claude. With both steps done, POA is told first which request was allowed, with the code allowing it handed
+// back (independent review, 2026-11-19, finding 1, fix b); without that, Claude's connection could do nothing once the
+// second step is required, so a refusal stops here and the code is never used.
+async function finish(url) {
+  if (secondStepDone && !(await vouch(codeIn(url)))) return;
+  goBack(url);
+}
+
 async function showConsent() {
   const { data, error } = await client.auth.oauth.getAuthorizationDetails(authorizationId);
   if (error || !data) return say((error && error.message) || "This sign-in request has expired. Start again from Claude.", true);
-  if (!("authorization_id" in data)) return goBack(data.redirect_url); // allowed before
+  if (!("authorization_id" in data)) return finish(data.redirect_url); // allowed before: the details call allowed it
   $("client-name").textContent = (data.client && data.client.name) || "An app";
   $("signin").hidden = true;
   $("consent").hidden = false;
   say("");
 }
 
+// With both steps done, tell POA which request was just allowed, with its code. Only the answer status "trusted" counts
+// (independent review, 2026-11-19, finding 5): an older connector answers this address with an empty OK that records
+// nothing.
+async function vouch(code) {
+  say("Checking...");
+  const { data } = await client.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  let answer = null;
+  try {
+    const res = token && code ? await fetch(CONNECTOR + "/trust-claude", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ authorization_id: authorizationId, code }),
+    }) : null;
+    answer = res ? await res.json().catch(() => null) : null;
+  } catch (e) {
+    answer = null;
+  }
+  if (answer && answer.status === "trusted") return true;
+  say("POA couldn't record your second step for this connection. Start again from Claude's Connect button, and sign in here only right after pressing it.", true);
+  return false;
+}
+
 async function decide(allow) {
   $("approve").disabled = $("deny").disabled = true;
+  // skipBrowserRedirect: without it the library itself sends the browser to Claude with the code the moment Allow
+  // returns, before the vouch (measured on the test copy, 2026-11-19); only goBack returns to Claude, once.
   const { data, error } = allow
-    ? await client.auth.oauth.approveAuthorization(authorizationId)
-    : await client.auth.oauth.denyAuthorization(authorizationId);
+    ? await client.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true })
+    : await client.auth.oauth.denyAuthorization(authorizationId, { skipBrowserRedirect: true });
   if (error || !data || !data.redirect_url) {
     $("approve").disabled = $("deny").disabled = false;
     return say((error && error.message) || "That didn't work. Start again from Claude.", true);
   }
+  if (allow) return finish(data.redirect_url);
   goBack(data.redirect_url);
 }
 
@@ -119,8 +171,12 @@ $("signin-form").addEventListener("submit", async (event) => {
   $("password").value = "";
   button.disabled = false;
   if (error) return say("Sign-in failed: " + error.message, true);
-  const { data: level } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (level && level.nextLevel === "aal2" && level.currentLevel !== "aal2") {
+  // stop when the sign-in level can't be read, rather than go on to Allow with no code and no vouch (review finding 5)
+  const { data: level, error: levelError } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (levelError || !level || !level.nextLevel) {
+    return say("POA couldn't check your sign-in steps. Start again from Claude's Connect button.", true);
+  }
+  if (level.nextLevel === "aal2" && level.currentLevel !== "aal2") {
     $("signin").hidden = true;
     $("code").hidden = false;
     $("code-input").focus();
@@ -140,6 +196,7 @@ $("code-form").addEventListener("submit", async (event) => {
     : { error: { message: "no authenticator is set up" } };
   button.disabled = false;
   if (e2) return say("That code didn't work (" + e2.message + "). Type the next code your app shows.", true);
+  secondStepDone = true;
   $("code").hidden = true;
   await showConsent();
 });
