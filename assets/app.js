@@ -155,7 +155,7 @@
     const status = closed ? 'done' : sched ? sched.s : 'none';
     return { ...w, name: w.name || w.id, updatedDate: updated, closed, status, sched, blocked: !closed && stalledDays >= 3 ? stalledDays : 0 };
   });
-  const STATUS_LABEL = { done: 'Done', track: 'On track', risk: 'At risk', behind: 'Behind', none: 'No schedule' };
+  const STATUS_LABEL = { done: 'Done', moved: 'Moved', track: 'On track', risk: 'At risk', behind: 'Behind', none: 'No schedule' };
   const chip = st => `<span class="chip ${st}">${STATUS_LABEL[st]}</span>`;
   const needsChip = w => w.waiting && !w.closed ? '<span class="chip needs">Needs you</span>' : '';
   const slug = id => 'ws-' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -199,8 +199,8 @@
   // and hasn't; or it is underway and due within a week with its Jira records still open; or the coaching
   // questions' pace won't finish capture by its date. On track means on schedule, nothing else.
   const SOON = 7;
-  const SEVERITY = { done: 0, track: 1, risk: 2, behind: 3 };
-  const STATE_COLOR = { done: '--steel', track: '--green', risk: '--orange', behind: '--rose' };
+  const SEVERITY = { done: 0, moved: 0, track: 1, risk: 2, behind: 3 };
+  const STATE_COLOR = { done: '--steel', moved: '--steel', track: '--green', risk: '--orange', behind: '--rose' };
   // A schedule group, a build area (an epic) and a requirement area match by name, so "Shared foundation
   // (Missions 2–4)", "Shared foundation: database, …" and "Logging foundation requirements" are one area.
   const AREA_ALIAS = { 'logging foundation': 'shared foundation' };
@@ -271,11 +271,27 @@
     const st = rows.map(rowState);
     return { s: st.reduce((m, x) => SEVERITY[x.s] > SEVERITY[m] ? x.s : m, 'done'), why: st.flatMap(x => x.why) };
   }
+  // A group's retired rows: stages no longer needed, each item saying where the work went ("now in the coach's plans").
+  const retiredRows = group => ((S.feed.schedule && S.feed.schedule.rows) || []).filter(r => /retired/i.test(r.status) && r.group === group);
+  // An area's state. One whose remaining stages are done but some moved elsewhere is Moved, not Done, and says
+  // where they went (2026-11-20).
+  function areaState(name, rows) {
+    const st = rowsState(rows), moved = retiredRows(name);
+    return st && st.s === 'done' && moved.length ? { s: 'moved', why: [], moved } : st;
+  }
   // The schedule's groups (missions and increments), in delivery order, with their state and Jira records.
   function areas() {
     const groups = [];
     schedule().forEach(r => { let g = groups.find(x => x.name === r.group); if (!g) groups.push(g = { name: r.group, rows: [] }); g.rows.push(r); });
-    return groups.map(g => ({ ...g, ...rowsState(g.rows), cards: (buildArea(g.name) || {}).cards || null, req: reqArea(g.name) }));
+    return groups.map(g => ({ ...g, ...areaState(g.name, g.rows), cards: (buildArea(g.name) || {}).cards || null, req: reqArea(g.name) }));
+  }
+  // What became of a Moved area's retired stages: "Data contract, build and trials now in the coach's plans".
+  function movedLine(a) {
+    const items = (a.moved || []).map(r => shortItem(r.item, a.name));
+    const parts = items.map(t => t.match(/^(.+?),\s+(now\b.*)$/i));
+    if (!parts.length || !parts.every(p => p && p[2] === parts[0][2])) return 'Moved: ' + items.join('; ');
+    const heads = parts.map((p, i) => i ? lowerFirst(p[1]) : p[1]);
+    return (heads.length > 1 ? heads.slice(0, -1).join(', ') + ' and ' + heads[heads.length - 1] : heads[0]) + ' ' + parts[0][2];
   }
   // The rows a lane follows, from the feed's rule for it (a pattern per field; every given field must match).
   function laneState(id) {
@@ -594,7 +610,7 @@
       g.rows.push(r);
     });
     const bars = groups.map((g, y) => {
-      const st = rowsState(g.rows).s;
+      const st = areaState(g.label, g.rows).s;
       return { y, start: g.start, end: new Date(+g.end + DAY), done: g.done, late: st === 'behind', risk: st === 'risk',
         color: sColor(Object.keys(g.n).sort((a, b) => g.n[b] - g.n[a])[0] || 'all'),
         tip: `${esc(g.label)}<br>${fmt(g.start)} to ${fmtLong(g.end)} · ${STATUS_LABEL[st].toLowerCase()}` };
@@ -822,7 +838,7 @@
   function stateSummary(list) {
     if (!list.length) return 'Each area from its first stage to its last';
     const n = s => list.filter(a => a.s === s).length;
-    return ['behind', 'risk', 'track', 'done'].filter(s => n(s)).map(s => n(s) + ' ' + STATUS_LABEL[s].toLowerCase()).join(' · ');
+    return ['behind', 'risk', 'track', 'done', 'moved'].filter(s => n(s)).map(s => n(s) + ' ' + STATUS_LABEL[s].toLowerCase()).join(' · ');
   }
   const stateDot = s => `<span class="sd" style="--c:var(${STATE_COLOR[s] || '--steel'})"></span>`;
   const mini = items => items.length ? `<ul class="mini">${items.join('')}</ul>` : '<p class="empty">None</p>';
@@ -851,6 +867,7 @@
     const cards = a.cards || [];
     const selected = cards.filter(c => /selected/i.test(c.status));
     const line = a.s === 'done' ? 'Every stage done'
+      : a.s === 'moved' ? [stages.length === 1 ? `${label(stages[0])} done` : stages.length ? 'Other stages done' : '', esc(movedLine(a))].filter(Boolean).join(' · ')
       : [now.length ? 'Now: ' + now.map(r => `${label(r)} to ${esc(fmtD(r.finishD))}`).join(', ') : '',
         nextStage ? `Next: ${label(nextStage)}${nextStage.startD ? ', ' + esc(fmtD(nextStage.startD)) : ''}` : ''].filter(Boolean).join(' · ');
     const tl = targetLine(a);
@@ -964,7 +981,8 @@
       : 'Target windows are the sponsor’s planning dates, not forecasts.';
     const list = rows.length ? areas() : [];
     // Areas still under way first, in delivery order; finished ones last.
-    const ordered = list.filter(a => a.s !== 'done').concat(list.filter(a => a.s === 'done'));
+    const finished = a => a.s === 'done' || a.s === 'moved';
+    const ordered = list.filter(a => !finished(a)).concat(list.filter(finished));
     const b = S.feed.build, read = b && b.status === 'ok' ? parseDate(b.checked) : null;
     const soon = rows.length ? nextTwoWeeks() : [];
     const docLink = (S.feed.menus || []).some(m => (m.groups || []).some(g => (g.items || []).some(i => i.copy === 'jira-views')));

@@ -142,7 +142,7 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .chip.needs { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
 .chip.stalled { background: color-mix(in srgb, var(--rose) 16%, transparent); color: var(--rose); }
 .chip.track { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
-.chip.done { background: color-mix(in srgb, var(--steel) 18%, transparent); color: var(--steel); }
+.chip.done, .chip.moved { background: color-mix(in srgb, var(--steel) 18%, transparent); color: var(--steel); }
 /* Schedule status (2026-11-02): orange is at risk and rose behind; amber stays "waiting on Vince". */
 .chip.risk { background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange); }
 .chip.behind { background: color-mix(in srgb, var(--rose) 16%, transparent); color: var(--rose); }
