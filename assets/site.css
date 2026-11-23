@@ -167,6 +167,11 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .aware.day .d { flex: 0 0 64px; }
 .aware .t { flex: 1; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
 .nowrap { white-space: nowrap; }
+/* Awareness warnings: a coloured left edge and a label, amber "Warning" and red "Urgent". */
+.aware li.lvl-amber { --lc: var(--amber); } .aware li.lvl-red { --lc: var(--rose); }
+.aware li.lvl-amber, .aware li.lvl-red { border-left: 4px solid var(--lc); padding-left: 10px; border-radius: 4px; background: color-mix(in srgb, var(--lc) 9%, transparent); }
+.aware .lvl { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; line-height: 1.5; padding: 0 7px; border-radius: 99px; background: var(--lc); color: #160A02; vertical-align: 1px; }
+:root[data-theme="light"] .aware li.lvl-red .lvl { color: #fff; }
 /* Your pending actions, at the top of the Status page: ready ones stand out with an amber number, waiting ones are quieter. */
 .hero .pend-card { margin: 14px 0 20px; max-width: 760px; }
 .hero .pend-card p.empty { font-size: 14.5px; }

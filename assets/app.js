@@ -228,11 +228,24 @@
     let t = String(s == null ? '' : s).replace(ID_RE, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
     return t.length > max ? t.slice(0, max - 1).trim() + '…' : t;
   };
-  // { ready, lines: [{ at, day, time, item }] }, newest first, within the last three Eastern days.
+  // A warning (Project Director's document, Vince's two lists): amber, something went wrong or is at risk and
+  // it is in hand; red, harm done or likely to something of his that is hard to put right. The Registry's
+  // Level column says which; a line may instead start "Amber: " or "Red: ", which is taken off the text.
+  // "Red:" anywhere else in a line leaves it plain. Lines stay newest first whatever their level.
+  const AWARE_LEVEL = { amber: 'Warning', red: 'Urgent' };
+  const awareLevel = (level, item) => {
+    const lv = String(level || '').trim().toLowerCase();
+    if (AWARE_LEVEL[lv]) return { level: lv, text: item };
+    const m = String(item == null ? '' : item).match(/^\s*(amber|red)\s*:\s*/i);
+    return m ? { level: m[1].toLowerCase(), text: String(item).slice(m[0].length) } : { level: '', text: item };
+  };
+  // One line of the list: a warning gets a coloured left edge and its label, not colour alone.
+  const awareLi = (d, l) => `<li${l.level ? ` class="lvl-${l.level}"` : ''}><span class="d">${d}</span><span class="t">${l.level ? `<span class="lvl">${AWARE_LEVEL[l.level]}</span> ` : ''}${esc(l.item)}</span></li>`;
+  // { ready, lines: [{ at, day, time, item, level }] }, newest first, within the last three Eastern days.
   function awareness(now = new Date()) {
     const a = S.feed.awareness;
     let raw = null;
-    if (a && a.status === 'ok') raw = (a.lines || []).map(l => ({ when: l.when, item: l.item }));
+    if (a && a.status === 'ok') raw = (a.lines || []).map(l => ({ when: l.when, item: l.item, level: l.level }));
     else {
       const sec = content('awareness').find(s => s.title.toLowerCase() === 'lines');
       if (sec) raw = sec.items.map(it => {
@@ -244,8 +257,9 @@
     if (!raw) return { ready: false, lines: [] };
     const today = etDay(now), first = dayShift(today, 1 - AWARE_DAYS);
     const lines = raw.map(l => {
-      const at = whenOf(l.when), item = awareText(l.item);
-      return at && item ? { at, day: etDay(at), time: etTime(at), item } : null;
+      const { level, text } = awareLevel(l.level, l.item);
+      const at = whenOf(l.when), item = awareText(text);
+      return at && item ? { at, day: etDay(at), time: etTime(at), item, level } : null;
     }).filter(l => l && l.day >= first).sort((p, q) => q.at - p.at);
     return { ready: true, lines, today };
   }
@@ -260,7 +274,7 @@
     const sub = !A.lines.length ? 'What the Project Director wants you to know' : A.lines.length > AWARE_HOME
       ? `The newest ${AWARE_HOME} of ${A.lines.length} from the last three days` : 'From the last three days';
     const body = !A.ready ? `<p class="empty">${AWARE_OFF}</p>` : top.length
-      ? `<ul class="done-list plain aware">${top.map(l => `<li><span class="d">${esc(awareDay(l.day, A.today))}<br>${esc(l.time)}</span><span class="t">${esc(l.item)}</span></li>`).join('')}</ul>`
+      ? `<ul class="done-list plain aware">${top.map(l => awareLi(`${esc(awareDay(l.day, A.today))}<br>${esc(l.time)}`, l)).join('')}</ul>`
       : `<p class="empty">${AWARE_EMPTY}</p>`;
     return `<div class="card rise" id="sec-awareness"><h3>For your awareness</h3><div class="sub">${sub}${A.lines.length ? ' · <a class="nowrap" href="#awareness">See all&nbsp;&rsaquo;</a>' : ''}</div>${body}</div>`;
   }
@@ -271,7 +285,7 @@
     A.lines.forEach(l => { const g = days[days.length - 1]; if (g && g.day === l.day) g.lines.push(l); else days.push({ day: l.day, lines: [l] }); });
     const body = !A.ready ? `<div class="card rise"><p class="empty">${AWARE_OFF}</p></div>` : !days.length ? `<div class="card rise"><p class="empty">${AWARE_EMPTY}</p></div>`
       : days.map((g, i) => `<div class="card rise" style="animation-delay:${i * 50}ms"><h3>${esc(awareDay(g.day, A.today, true))}</h3><div class="sub">${esc(awareDate(g.day))} · ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}</div>
-        <ul class="done-list plain aware day">${g.lines.map(l => `<li><span class="d">${esc(l.time)}</span><span class="t">${esc(l.item)}</span></li>`).join('')}</ul></div>`).join('');
+        <ul class="done-list plain aware day">${g.lines.map(l => awareLi(esc(l.time), l)).join('')}</ul></div>`).join('');
     return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap">${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
   }
 
