@@ -224,9 +224,9 @@
     const t = z ? new Date(`${y}-${mo}-${d}T${h.padStart(2, '0')}:${mi}:${sec.padStart(2, '0')}${z === 'Z' ? 'Z' : z.replace(/^([+-]\d{2}):?(\d{2})$/, '$1:$2')}`) : etWall(+y, +mo, +d, +h, +mi, +sec);
     return isNaN(t) ? null : t;
   };
-  const awareText = s => {
+  const awareText = (s, max = AWARE_MAX) => {
     let t = String(s == null ? '' : s).replace(ID_RE, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
-    return t.length > AWARE_MAX ? t.slice(0, AWARE_MAX - 1).trim() + '…' : t;
+    return t.length > max ? t.slice(0, max - 1).trim() + '…' : t;
   };
   // { ready, lines: [{ at, day, time, item }] }, newest first, within the last three Eastern days.
   function awareness(now = new Date()) {
@@ -273,6 +273,53 @@
       : days.map((g, i) => `<div class="card rise" style="animation-delay:${i * 50}ms"><h3>${esc(awareDay(g.day, A.today, true))}</h3><div class="sub">${esc(awareDate(g.day))} · ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}</div>
         <ul class="done-list plain aware day">${g.lines.map(l => `<li><span class="d">${esc(l.time)}</span><span class="t">${esc(l.item)}</span></li>`).join('')}</ul></div>`).join('');
     return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap">${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
+  }
+
+  // ---------- your pending actions ----------
+  // Every action waiting on Vince, in the Project Director's order, each with what it waits on (Vince,
+  // 2026-11-23: "I need to be able to go on the website to see what's up next"). Kept by the Project
+  // Director only, in the Registry's Pending actions tab (Order | Action | How long | State | Waits on).
+  // Until the feed reads the tab, the lines are bullets under "pending" > "Lines" in the content document,
+  // each "Order: Action | How long | State | Waits on". Ready actions come first and stand out, then the
+  // ones that wait, each in order. The whole list shows; past eight, the rest folds behind See all.
+  const PEND_FOLD = 8;
+  const pendState = (state, waitsOn) => /^\s*ready/i.test(state || '') ? 'ready' : /^\s*wait/i.test(state || '') ? 'waits' : String(waitsOn || '').trim() ? 'waits' : 'ready';
+  // { ready, actions: [{ order, action, howLong, state, waitsOn }] }, ready ones first.
+  function pending() {
+    const p = S.feed.pending;
+    let raw = null;
+    if (p && p.status === 'ok') raw = p.actions || [];
+    else {
+      const sec = content('pending').find(x => x.title.toLowerCase() === 'lines');
+      // The feed splits a bullet at its first colon when two or more characters come before it, so a
+      // two-digit order arrives as the label: the halves are joined again.
+      if (sec) raw = sec.items.map(it => {
+        const m = (it.label ? it.label + ': ' + it.text : it.text).match(/^\s*(\d+(?:\.\d+)?)\s*[:.)]\s*(.+)$/);
+        if (!m) return null;
+        const [action, howLong, state, waitsOn] = m[2].split('|').map(x => x.trim());
+        return { order: m[1], action, howLong, state, waitsOn: String(waitsOn || '').replace(/^waits on\s*:?\s*/i, '') };
+      }).filter(Boolean);
+    }
+    if (!raw) return { ready: false, actions: [] };
+    const num = o => { const n = parseFloat(o); return isNaN(n) ? Infinity : n; };
+    const actions = raw.map((a, i) => ({ i, order: num(a.order), action: awareText(a.action, 300), howLong: awareText(a.howLong, 40),
+      waitsOn: awareText(a.waitsOn, 200), state: pendState(a.state, a.waitsOn) })).filter(a => a.action)
+      .sort((x, y) => (x.state === y.state ? 0 : x.state === 'ready' ? -1 : 1) || (x.order === y.order ? 0 : x.order < y.order ? -1 : 1) || x.i - y.i);
+    return { ready: true, actions };
+  }
+  const PEND_EMPTY = 'Nothing needs you right now.';
+  function pendItem(a, n) {
+    const meta = [a.state === 'ready' ? 'Ready now' : 'Waits', a.howLong].filter(Boolean).join(' · ');
+    return `<li class="pend ${a.state}"><span class="pn">${n}</span><div class="pend-body"><b>${esc(a.action)}</b><span class="pend-meta">${esc(meta)}</span>${a.state === 'waits' && a.waitsOn ? `<span class="pend-wait">Waits on: ${esc(a.waitsOn)}</span>` : ''}</div></li>`;
+  }
+  function pendingCard() {
+    const P = pending(), list = P.actions, ready = list.filter(a => a.state === 'ready').length, waits = list.length - ready;
+    const sub = !list.length ? 'What needs you, in the Project Director’s order'
+      : [ready ? ready + ' ready now' : 'Nothing ready now', waits ? waits + ' waiting on something first' : ''].filter(Boolean).join(' · ');
+    const body = !P.ready ? `<p class="empty">${AWARE_OFF}</p>` : !list.length ? `<p class="empty">${PEND_EMPTY}</p>`
+      : `<ol class="pend-list">${list.slice(0, PEND_FOLD).map((a, i) => pendItem(a, i + 1)).join('')}</ol>` +
+        (list.length > PEND_FOLD ? `<details class="pend-more"><summary>See all ${list.length}</summary><ol class="pend-list">${list.slice(PEND_FOLD).map((a, i) => pendItem(a, PEND_FOLD + i + 1)).join('')}</ol></details>` : '');
+    return `<div class="card rise pend-card" id="sec-pending"><h3>Your pending actions</h3><div class="sub">${esc(sub)}</div>${body}</div>`;
   }
 
   // ---------- schedule status ----------
@@ -444,6 +491,7 @@
   const MENU = [
     { key: 'status', label: 'Status', items: [
       { href: '#home', label: 'Status overview', sub: 'Waiting on you, progress and what’s next', ico: '&#8962;', c: '--teal' },
+      { href: '#pending', label: 'Your pending actions', sub: 'What needs you, and what each waits on', ico: '&#10148;', c: '--amber' },
       { href: '#awareness', label: 'For your awareness', sub: 'What’s new in the last three days', ico: '&#9673;', c: '--amber' },
       { href: '#roadmap', label: 'Schedule and milestones', sub: 'Every stage from June to launch', ico: '&#9719;', c: '--sky' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
@@ -837,6 +885,7 @@
     return `
       <section class="hero"><div class="hero-in">
         <div class="kicker rise">Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
+        ${pendingCard()}
         <h1 class="rise">${hlHtml}</h1>
         <p class="rise">${esc(intro)}</p>
         <div class="kpis">${kpis}</div>
@@ -1175,6 +1224,10 @@
     rows.push(aw && aw.status === 'ok' ? { c: dot(gen), b: 'Awareness lines (Registry)', s: 'read with the Registry · ' + A.lines.length + ' from the last three days' }
       : A.ready ? { c: css('--amber'), b: 'Awareness lines (content document)', s: A.lines.length + ' from the last three days, until the feed reads the Registry tab' }
       : { c: css('--steel'), b: 'Awareness lines', s: aw ? String(aw.status) : 'not connected yet' });
+    const pe = S.feed.pending, P = pending();
+    rows.push(pe && pe.status === 'ok' ? { c: dot(gen), b: 'Pending actions (Registry)', s: 'read with the Registry · ' + P.actions.length + ' actions' }
+      : P.ready ? { c: css('--amber'), b: 'Pending actions (content document)', s: P.actions.length + ' actions, until the feed reads the Registry tab' }
+      : { c: css('--steel'), b: 'Pending actions', s: pe ? String(pe.status) : 'not connected yet' });
     return head(crumb('health', 'Data health'), 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
       `<div class="wrap"><div class="card rise">${rows.map(r => `<div class="health-row"><span class="dot" style="background:${r.c}"></span><span><b>${esc(r.b)}</b><span>${esc(r.s)}</span></span></div>`).join('')}
       <div class="health-row" id="copyHealth"><span class="dot" style="background:${css('--steel')}"></span><span><b>Document copies and diagrams</b><span>Checking…</span></span></div></div></div>`;
@@ -1429,7 +1482,7 @@
   };
 
   // The waiting and workstreams lists live on the Status page; their old addresses open it at that section.
-  const SECTIONS = { status: '', glance: 'sec-glance', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
+  const SECTIONS = { status: '', pending: 'sec-pending', glance: 'sec-glance', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
 
   function render() {
     let route = (location.hash || '#home').slice(1) || 'home';

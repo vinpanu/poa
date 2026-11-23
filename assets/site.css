@@ -167,6 +167,21 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .aware.day .d { flex: 0 0 64px; }
 .aware .t { flex: 1; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
 .nowrap { white-space: nowrap; }
+/* Your pending actions, at the top of the Status page: ready ones stand out with an amber number, waiting ones are quieter. */
+.hero .pend-card { margin: 14px 0 20px; max-width: 760px; }
+.hero .pend-card p.empty { font-size: 14.5px; }
+.pend-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.pend { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.pend-list:last-child .pend:last-child { border-bottom: 0; }
+.pend .pn { flex: 0 0 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pend.ready .pn { background: var(--amber); color: #1B1300; }
+.pend.waits .pn { border: 1px solid var(--line-2); color: var(--muted); }
+.pend-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pend-body b { display: block; font-size: 15px; line-height: 1.4; }
+.pend.waits .pend-body b { font-weight: 600; color: var(--ink-2); }
+.pend-meta, .pend-wait { display: block; font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+.pend.ready .pend-meta { color: var(--amber); font-weight: 700; }
+.pend-more summary { cursor: pointer; font-weight: 800; color: var(--teal); padding: 10px 0 2px; font-size: 14px; }
 
 /* ---------- content pages ---------- */
 .page-head { max-width: 1240px; margin: 0 auto; padding: 26px var(--gutter) 0; }
