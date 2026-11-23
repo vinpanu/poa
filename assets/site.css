@@ -162,6 +162,11 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: -.2px; text-wrap: bala
 .done-list .d { color: var(--muted); flex: 0 0 52px; font-size: 12.5px; padding-top: 1px; font-variant-numeric: tabular-nums; }
 .done-list .t::before { content: "\2713"; color: var(--green); font-weight: 800; margin-right: 6px; }
 .empty { color: var(--muted); font-size: 14.5px; padding: 6px 0; }
+/* For your awareness: day and time beside each line, the time alone on the full list's day cards. */
+.aware .d { flex: 0 0 72px; line-height: 1.35; }
+.aware.day .d { flex: 0 0 64px; }
+.aware .t { flex: 1; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.nowrap { white-space: nowrap; }
 
 /* ---------- content pages ---------- */
 .page-head { max-width: 1240px; margin: 0 auto; padding: 26px var(--gutter) 0; }

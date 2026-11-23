@@ -191,6 +191,90 @@
   // The lane whose progress counts the coaching questions (the raw feed, so the schedule status can use it).
   const questionLane = () => (S.feed.workstreams || []).find(x => x.progress && /question/i.test(x.progress.measure || ''));
 
+  // ---------- for your awareness ----------
+  // What the Project Director wants Vince to know without asking him anything (Vince, 2026-11-23), one
+  // line each, from the Registry's Awareness tab. The home page shows the newest five; the full list shows
+  // every line from the last three days in Eastern time, today included, newest first, grouped by day.
+  // Older lines stay in the Registry and simply stop showing. The page cuts the list, not the feed, so a
+  // line leaves on time even when the data was built an hour earlier. Until the feed reads the tab, the
+  // lines can come from the content document instead: bullets under "Awareness" > "Lines", each
+  // "When: Item".
+  const ET = 'America/New_York', AWARE_DAYS = 3, AWARE_HOME = 5, AWARE_MAX = 200;
+  const ID_RE = /\b(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9]{0,7}-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6})?\b/g;
+  const etDay = d => d.toLocaleDateString('en-CA', { timeZone: ET });
+  const etTime = d => d.toLocaleTimeString('en-US', { timeZone: ET, hour: 'numeric', minute: '2-digit' });
+  const dayShift = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+  // A wall-clock time without a zone is read as Eastern.
+  const etWall = (y, mo, d, h, mi, s) => {
+    let t = Date.UTC(y, mo - 1, d, h, mi, s);
+    for (let i = 0; i < 2; i++) {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ET, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+        .formatToParts(new Date(t)).map(x => [x.type, +x.value]));
+      t -= Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Date.UTC(y, mo - 1, d, h, mi, s);
+    }
+    return new Date(t);
+  };
+  const WHEN = '(\\d{4})-(\\d{2})-(\\d{2})[T ](\\d{1,2}):(\\d{2})(?::(\\d{2}))?(?:\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})?';
+  const WHEN_RE = new RegExp('^' + WHEN + '$');
+  const LINE_RE = new RegExp('^(' + WHEN.replace(/\((?!\?)/g, '(?:') + ')\\s*:\\s*(.+)$');
+  const whenOf = s => {
+    const m = String(s || '').trim().match(WHEN_RE);
+    if (!m) return null;
+    const [, y, mo, d, h, mi, sec = '0', z] = m;
+    const t = z ? new Date(`${y}-${mo}-${d}T${h.padStart(2, '0')}:${mi}:${sec.padStart(2, '0')}${z === 'Z' ? 'Z' : z.replace(/^([+-]\d{2}):?(\d{2})$/, '$1:$2')}`) : etWall(+y, +mo, +d, +h, +mi, +sec);
+    return isNaN(t) ? null : t;
+  };
+  const awareText = s => {
+    let t = String(s == null ? '' : s).replace(ID_RE, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
+    return t.length > AWARE_MAX ? t.slice(0, AWARE_MAX - 1).trim() + '…' : t;
+  };
+  // { ready, lines: [{ at, day, time, item }] }, newest first, within the last three Eastern days.
+  function awareness(now = new Date()) {
+    const a = S.feed.awareness;
+    let raw = null;
+    if (a && a.status === 'ok') raw = (a.lines || []).map(l => ({ when: l.when, item: l.item }));
+    else {
+      const sec = content('awareness').find(s => s.title.toLowerCase() === 'lines');
+      if (sec) raw = sec.items.map(it => {
+        // The feed splits a bullet at its first colon, inside the time, so the two halves are joined again.
+        const m = (it.label ? it.label + ':' + it.text : it.text).match(LINE_RE);
+        return m ? { when: m[1], item: m[2] } : null;
+      }).filter(Boolean);
+    }
+    if (!raw) return { ready: false, lines: [] };
+    const today = etDay(now), first = dayShift(today, 1 - AWARE_DAYS);
+    const lines = raw.map(l => {
+      const at = whenOf(l.when), item = awareText(l.item);
+      return at && item ? { at, day: etDay(at), time: etTime(at), item } : null;
+    }).filter(l => l && l.day >= first).sort((p, q) => q.at - p.at);
+    return { ready: true, lines, today };
+  }
+  // A day's name: Today, Yesterday, else its weekday (short on the home page), and its full date.
+  const dayFmt = (day, o) => new Date(day + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
+  const awareDay = (day, today, long) => day === today ? 'Today' : day === dayShift(today, -1) ? 'Yesterday' : dayFmt(day, { weekday: long ? 'long' : 'short' });
+  const awareDate = day => dayFmt(day, { month: 'long', day: 'numeric' });
+  const AWARE_EMPTY = 'Nothing new in the last three days.';
+  const AWARE_OFF = 'Not connected yet. The lines appear here as soon as the site can read them.';
+  function awarenessCard(now) {
+    const A = awareness(now), top = A.lines.slice(0, AWARE_HOME);
+    const sub = !A.lines.length ? 'What the Project Director wants you to know' : A.lines.length > AWARE_HOME
+      ? `The newest ${AWARE_HOME} of ${A.lines.length} from the last three days` : 'From the last three days';
+    const body = !A.ready ? `<p class="empty">${AWARE_OFF}</p>` : top.length
+      ? `<ul class="done-list plain aware">${top.map(l => `<li><span class="d">${esc(awareDay(l.day, A.today))}<br>${esc(l.time)}</span><span class="t">${esc(l.item)}</span></li>`).join('')}</ul>`
+      : `<p class="empty">${AWARE_EMPTY}</p>`;
+    return `<div class="card rise" id="sec-awareness"><h3>For your awareness</h3><div class="sub">${sub}${A.lines.length ? ' · <a class="nowrap" href="#awareness">See all&nbsp;&rsaquo;</a>' : ''}</div>${body}</div>`;
+  }
+  function pageAwareness(now) {
+    const A = awareness(now);
+    const lead = section('awareness', 'Intro').paras[0] || 'What the Project Director wants you to know from the last three days, newest first. Nothing here needs an answer.';
+    const days = [];
+    A.lines.forEach(l => { const g = days[days.length - 1]; if (g && g.day === l.day) g.lines.push(l); else days.push({ day: l.day, lines: [l] }); });
+    const body = !A.ready ? `<div class="card rise"><p class="empty">${AWARE_OFF}</p></div>` : !days.length ? `<div class="card rise"><p class="empty">${AWARE_EMPTY}</p></div>`
+      : days.map((g, i) => `<div class="card rise" style="animation-delay:${i * 50}ms"><h3>${esc(awareDay(g.day, A.today, true))}</h3><div class="sub">${esc(awareDate(g.day))} · ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}</div>
+        <ul class="done-list plain aware day">${g.lines.map(l => `<li><span class="d">${esc(l.time)}</span><span class="t">${esc(l.item)}</span></li>`).join('')}</ul></div>`).join('');
+    return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap">${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
+  }
+
   // ---------- schedule status ----------
   // Each stage, area and lane is Done, On track, At risk or Behind (Vince, 2026-11-02), against the agreed
   // dates where a row has them (2026-11-13). Behind: a stage is past its finish date or its agreed finish, or
@@ -360,6 +444,7 @@
   const MENU = [
     { key: 'status', label: 'Status', items: [
       { href: '#home', label: 'Status overview', sub: 'Waiting on you, progress and what’s next', ico: '&#8962;', c: '--teal' },
+      { href: '#awareness', label: 'For your awareness', sub: 'What’s new in the last three days', ico: '&#9673;', c: '--amber' },
       { href: '#roadmap', label: 'Schedule and milestones', sub: 'Every stage from June to launch', ico: '&#9719;', c: '--sky' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
       { href: '#trends', label: 'Progress trends', sub: 'Coverage over time', ico: '&#9650;', c: '--green' },
@@ -759,6 +844,7 @@
       <div class="wrap">
         <div class="card rise" id="sec-glance"><h3>Done, now and next</h3><div class="sub">The last two weeks, today and the next four weeks · <a href="#roadmap">Full schedule &rsaquo;</a></div>${glance()}</div>
         <div class="card rise" id="sec-waiting"><h3>Waiting on Vince</h3><div class="sub">${needs.length ? 'These can’t move without you. Red means no update for three days or more.' : 'Nothing is waiting on you right now'}</div>${needs.map(needItem).join('')}</div>
+        ${awarenessCard()}
         <div class="grid g-pair">
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
         </div>
@@ -1084,6 +1170,11 @@
       const d = p.status === 'ok' ? parseDate(p.checked) : null;
       rows.push({ c: d ? dot(d) : css('--rose'), b: label, s: d ? 'read ' + fmtLong(d) + ', ' + fmtTime(d) : String(p.status || 'not read') });
     });
+    // The awareness lines: read with the Registry, or from the content document until the feed reads the tab.
+    const aw = S.feed.awareness, A = awareness();
+    rows.push(aw && aw.status === 'ok' ? { c: dot(gen), b: 'Awareness lines (Registry)', s: 'read with the Registry · ' + A.lines.length + ' from the last three days' }
+      : A.ready ? { c: css('--amber'), b: 'Awareness lines (content document)', s: A.lines.length + ' from the last three days, until the feed reads the Registry tab' }
+      : { c: css('--steel'), b: 'Awareness lines', s: aw ? String(aw.status) : 'not connected yet' });
     return head(crumb('health', 'Data health'), 'Data health', 'When each source last refreshed. Green is today, amber is within three days, red is older.') +
       `<div class="wrap"><div class="card rise">${rows.map(r => `<div class="health-row"><span class="dot" style="background:${r.c}"></span><span><b>${esc(r.b)}</b><span>${esc(r.s)}</span></span></div>`).join('')}
       <div class="health-row" id="copyHealth"><span class="dot" style="background:${css('--steel')}"></span><span><b>Document copies and diagrams</b><span>Checking…</span></span></div></div></div>`;
@@ -1330,7 +1421,7 @@
   }
 
   const ROUTES = {
-    home: [pageHome, afterHome, 'Status'],
+    home: [pageHome, afterHome, 'Status'], awareness: [pageAwareness, null, 'For your awareness'],
     roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
