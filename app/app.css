@@ -198,6 +198,9 @@ table.nut tr.grp th { padding-top: .7rem; color: var(--text); font-size: .85rem;
 .fm.none { border-color: var(--axis); }
 .fm.come { border-color: var(--grid); }
 .wm { display: inline-block; width: .7rem; height: .35rem; border-radius: 2px; background: var(--series-1); }
+.bm { display: inline-block; width: .35rem; height: .6rem; border-radius: 1px; background: var(--series-2); }
+.sm { display: inline-block; width: .55rem; height: .55rem; transform: rotate(45deg); background: var(--warn); }
+.weigh-ins li { margin: .2rem 0; }
 .keyline i { vertical-align: middle; }
 .figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: .5rem; }
 .fig { display: grid; gap: .1rem; }

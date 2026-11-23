@@ -287,6 +287,14 @@ async function nutritionLiftsPage(body, rerender) {
   Views.show.nutrition_vs_performance(body, r, view());
 }
 
+// Body weight (REQ-BW-008): any period, as a graph or text, with weight beside calories
+async function weightPage(body, rerender) {
+  body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender)));
+  const { from, to } = period();
+  const r = await call("body_weight_report", { from, to });
+  Views.show.body_weight_report(body, r, view());
+}
+
 // The reports, nutrition first (REQ-WEB-013); each keeps its graph-or-text switch (REQ-RPT-007)
 const NUTRITION_REPORTS = [
   { path: "nutrition", title: "Nutrients over time", blurb: "Calories, protein, carbs, fat and any micronutrient, by day, week or month", render: nutritionPage },
@@ -299,7 +307,11 @@ const EXERCISE_REPORTS = [
   { path: "workouts", title: "Workouts", blurb: "Workouts per week and how long they took", render: workoutsPage },
   { path: "nutrition-lifts", title: "Nutrition and lifts", blurb: "A nutrient's weekly average beside your best set", render: nutritionLiftsPage },
 ];
-const PAGES = [...NUTRITION_REPORTS, ...EXERCISE_REPORTS];
+// Body weight comes after nutrition and exercise (REQ-WEB-013, REQ-BW-008)
+const BODY_REPORTS = [
+  { path: "weight", title: "Body weight", blurb: "Your weight by day and week, every weigh-in, and weight beside calories", render: weightPage },
+];
+const PAGES = [...NUTRITION_REPORTS, ...EXERCISE_REPORTS, ...BODY_REPORTS];
 const tiles = (list) => h("div", { class: "tiles" }, list.map((p) => h("a", { class: "tile", href: "#/r/" + p.path }, h("strong", {}, p.title), h("span", {}, p.blurb))));
 const openFood = (entryId) => Pages.foodSheet(entryId, call);
 
@@ -344,12 +356,16 @@ async function historyPage(body, date) {
   Pages.dayView(body, r, { live: d === t, openFood });
 }
 
-// Reports (REQ-WEB-013): nutrition first, then exercise. Nutrition opens on the period's summary (task P4).
+// Reports (REQ-WEB-013): nutrition first, then exercise, then body weight. Nutrition opens on the period's summary (task P4).
 let reportSection = "nut";
 async function reportsPage(body, rerender) {
-  body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition or exercise")));
+  body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"], ["bw", "Body weight"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition, exercise or body weight")));
   if (reportSection === "ex") {
     body.append(h("p", { class: "muted small" }, "Each report covers any period, with a graph or text."), tiles(EXERCISE_REPORTS));
+    return;
+  }
+  if (reportSection === "bw") {
+    body.append(h("p", { class: "muted small" }, "Any period, with a graph or text."), tiles(BODY_REPORTS));
     return;
   }
   body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender)));

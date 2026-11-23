@@ -176,9 +176,23 @@ const Pages = (() => {
     }));
   }
 
+  // The day's weigh-ins as saved (REQ-BW-006): the day's weight with its time, then the later readings, each with its
+  // time and note; "No weigh-in" for a day without one, never zero; no change and no comment. And the day's sick mark
+  // (REQ-LOG-011). A database without body weight yet sends neither, and the card stays out.
+  function weightCard(d) {
+    if (!("weigh_ins" in d)) return null;
+    const list = d.weigh_ins || [];
+    const sick = d.sick ? h("p", { class: "small" }, h("i", { class: "sm" }), " Marked sick" + (d.sick.reported_later ? ", reported later" : "")) : null;
+    if (!list.length) return card("Weight", null, h("p", { class: "muted small" }, d.weigh_in_says || "No weigh-in"), sick);
+    return card("Weight", list.length > 1 ? h("span", { class: "muted small" }, "The first weigh-in is the day's weight") : null,
+      h("ul", { class: "plain weigh-ins" }, list.map((x) => h("li", {},
+        h("b", {}, Views.reading(x)), h("span", { class: "muted" }, " · " + Views.readingTime(x)),
+        x.note ? h("div", { class: "small muted" }, x.note) : null))), sick);
+  }
+
   // REQ-WEB-002 (Today) and REQ-WEB-007 (any past day, shown as Today showed it)
   function dayView(body, d, opts) {
-    body.append(...[summaryCard(d, opts.live), mealsCard(d, opts.openFood), workoutCard(d)].filter(Boolean));
+    body.append(...[summaryCard(d, opts.live), weightCard(d), mealsCard(d, opts.openFood), workoutCard(d)].filter(Boolean));
     if ((d.meals || []).length) {
       body.append(h("p", { class: "hint" }, "Something wrong? Tell the coach, for example “the rice in meal 2 was 100 grams”. It fixes the entry and reads it back; refresh to see it here. Editing on this site comes in version 2."));
     }
@@ -252,14 +266,16 @@ const Pages = (() => {
     const tw = w.this_week, lw = w.last_week;
     const strip = h("div", { class: "days" }, (w.days || []).map((d) => {
       const m = d.to_come ? ["To come", "come"] : FOOD_MARK[d.food] || ["", "none"];
-      const label = [dow(d.date) + " " + parse(d.date).getDate(), m[0], d.workouts ? "workout logged" : null].filter(Boolean).join(", ");
+      const label = [dow(d.date) + " " + parse(d.date).getDate(), m[0], d.workouts ? "workout logged" : null,
+        d.weigh_in ? "weigh-in" : null, d.sick ? "sick" : null].filter(Boolean).join(", ");
       const kids = [h("span", { class: "dd" }, dow(d.date)), h("span", { class: "dn" }, String(parse(d.date).getDate())),
-        h("span", { class: "marks" }, h("i", { class: "fm " + m[1] }), d.workouts ? h("i", { class: "wm" }) : null)];
+        h("span", { class: "marks" }, h("i", { class: "fm " + m[1] }), d.workouts ? h("i", { class: "wm" }) : null,
+          d.weigh_in ? h("i", { class: "bm" }) : null, d.sick ? h("i", { class: "sm" }) : null)];
       return d.to_come ? h("span", { class: "day come", "aria-label": label }, ...kids)
         : h("a", { class: "day" + (d.date === w.today ? " now" : ""), href: "#/day/" + d.date, "aria-label": label + ". Open this day" }, ...kids);
     }));
     const key = h("p", { class: "tiny muted keyline" }, h("i", { class: "fm ok" }), " food logged ", h("i", { class: "fm part" }), " not fully logged ",
-      h("i", { class: "wm" }), " workout. Tap a day to open it.");
+      h("i", { class: "wm" }), " workout", w.weight ? [" ", h("i", { class: "bm" }), " weigh-in ", h("i", { class: "sm" }), " sick"] : null, ". Tap a day to open it.");
 
     // Daily averages over the finished, fully logged days, beside the same days of last week
     const a = tw.averages, b = lw.averages;
@@ -282,6 +298,26 @@ const Pages = (() => {
     ], [...avgBody,
       a.days_counted ? h("p", { class: "small" }, h("b", {}, "This week")) : null, a.days_counted ? avgDays(tw, a.days) : null, leftOut(a),
       b.days_counted ? h("p", { class: "small" }, h("b", {}, "Last week, same days")) : null, b.days_counted ? avgDays(lw, b.days) : null, leftOut(b)]);
+
+    // Average weight over the finished days, beside the same days of last week, opening to the readings behind each
+    // (REQ-BW-007): each weighed-in day's first weigh-in; days without one are left out, never zero
+    const wt = w.weight;
+    const wlines = (side) => h("ul", { class: "plain" }, (side.readings || []).map((x) =>
+      h("li", {}, h("a", { href: "#/day/" + x.date }, dayShort(x.date)), " · " + Views.reading(x) + " · " + Views.readingTime(x) + (x.note ? " · " + x.note : ""))));
+    const hasAvg = (s) => s && s.average_lb !== null && s.average_lb !== undefined;
+    const weightRow = wt ? row([
+      h("span", { class: "s-main" }, h("span", { class: "s-title" }, "Average weight"),
+        h("span", { class: "s-sub" }, hasAvg(wt.this_week) ? plural(wt.this_week.days, "day") + ", beside last week's same days" : wt.this_week.says)),
+      h("span", { class: "s-right" }, hasAvg(wt.this_week) ? Views.lb(wt.this_week.average_lb) : "–", h("span", { class: "tiny muted" }, " lb")),
+    ], [
+      hasAvg(wt.this_week) ? h("div", { class: "figs" }, h("div", { class: "fig" }, h("span", { class: "label" }, "Weight"),
+        vsLast(wt.this_week.average_lb, wt.last_week.average_lb, (v) => Views.lb(v) + " lb"))) : h("p", { class: "muted small" }, wt.this_week.says),
+      wt.change_says ? h("p", { class: "small" }, wt.change_says) : null,
+      (wt.this_week.readings || []).length ? h("p", { class: "small" }, h("b", {}, "This week")) : null, wlines(wt.this_week),
+      (wt.last_week.readings || []).length ? h("p", { class: "small" }, h("b", {}, "Last week, same days")) : h("p", { class: "muted small" }, "Last week, same days: " + (wt.last_week.says || "no weigh-ins")),
+      wlines(wt.last_week),
+      h("p", { class: "tiny muted" }, "Each day's first weigh-in counts; today joins once it's over."),
+    ]) : null;
 
     // Workouts
     const wlist = (side) => h("ul", { class: "plain" }, (side.workouts.list || []).map((x) =>
@@ -313,7 +349,7 @@ const Pages = (() => {
     const setsCard = h("div", { class: "list" }, mgRows.length ? mgRows : [h("p", { class: "muted small" }, "No working sets yet this week.")]);
 
     body.append(card("This week", h("span", { class: "muted small" }, dayShort(w.week_start) + " – " + dayShort(w.week_end)),
-      strip, key, h("div", { class: "list" }, avgRow, woRow)),
+      strip, key, h("div", { class: "list" }, avgRow, weightRow, woRow)),
     card("Working sets by muscle group", h("span", { class: "muted small" }, "This week · last week's same days"), setsCard,
       h("p", { class: "tiny muted" }, "Today's sets count. Warm-ups don't; each weight in a drop set counts as a set; a set counts once for each muscle group it trains.")));
   }

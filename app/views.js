@@ -304,6 +304,50 @@ const Views = (() => {
     body.append(notes(r.rule ? r.rule.replace(/ Say how sure you are.*$/, "") : null, r.training_note, ...weeks.filter((w) => w.note).map((w) => "Week of " + short(w.week_start) + ": " + w.note)));
   }
 
+  // Body weight (REQ-BW-008, REQ-RPT-008): each day's weight, each week's average and every reading. A day without a
+  // weigh-in is a gap, never zero, and isn't missing data, so nothing here carries an asterisk (REQ-RPT-005 r3).
+  const lb = (v) => (v === null || v === undefined ? "–" : String(Number(v)));
+  const reading = (x) => (x.approximate ? "about " : "") + lb(x.weight_lb) + " lb" + (x.kg ? " (" + lb(x.kg) + " kg)" : "");
+  const readingTime = (x) => (x.time_said || "no time") + (x.zone_name ? " " + x.zone_name : "") + (x.reported_later ? ", reported later" : "");
+  function bodyWeight(body, r, o) {
+    stopDraw();
+    const days = r.days || [];
+    if (r.status === "no_weigh_ins" || !days.length) { body.append(notes(r.says || "No weigh-ins in this period.")); return; }
+    const byDay = new Map(days.map((d) => [d.date, d]));
+    const all = [];
+    for (let s = r.from; s <= r.to; s = addDays(s, 1)) all.push(s);
+    const weeks = r.weeks || [];
+    const wk = (w) => "Week of " + short(w.week_start) + (w.label ? " (" + w.label + ")" : "");
+    const based = (n) => "based on " + n + " day" + (n === 1 ? "" : "s");
+    const approxKey = h("div", { class: "key" }, h("span", {}, h("i", { class: "k-est" }), "approximate reading (\"about\")"));
+    if (o.view === "graph") {
+      const a = chartBox("Weight (lb)", "Each day's first weigh-in; a day without one is a gap");
+      const b = chartBox("Average weight each week (lb)", "Monday to Sunday, over the days weighed");
+      const c = chartBox("Calories, average per full day, each week", "Beside the weekly average weight");
+      body.append(a.node, b.node, c.node, approxKey);
+      draw(() => {
+        Charts.line(a.plot, { aria: "Weight by day", points: all.map((s) => {
+          const d = byDay.get(s);
+          return { label: long(s), short: short(s), value: d ? d.weight_lb : null, estimate: !!(d && d.approximate),
+            tip: long(s) + "\n" + (d ? (d.approximate ? "about " : "") + lb(d.weight_lb) + " lb" + (d.readings > 1 ? "\n" + d.readings + " weigh-ins that day; the first counts" : "") : "No weigh-in") };
+        }) });
+        Charts.line(b.plot, { aria: "Average weight by week", points: weeks.map((w) => ({ label: wk(w), short: short(w.week_start), value: w.average_lb,
+          tip: wk(w) + "\n" + (w.average_lb !== null && w.average_lb !== undefined ? lb(w.average_lb) + " lb, " + based(w.days) : "No weigh-ins") })) });
+        Charts.columns(c.plot, { aria: "Calories per full day by week", points: weeks.map((w) => ({ label: wk(w), short: short(w.week_start),
+          value: w.calorie_days ? w.calories_average : null, missing: !w.calorie_days,
+          tip: wk(w) + "\n" + (w.calorie_days ? fmt(w.calories_average) + " kcal per full day, " + based(w.calorie_days) : "No full days") })) });
+      });
+    } else {
+      body.append(table(["Day", "Time", "Weight", "Note"], (r.readings || []).map((x) => ({ cells: [long(x.date), readingTime(x), reading(x), x.note || ""] })), { num: [2] }));
+      body.append(table(["Week", "Average weight", "Days weighed", "Calories per full day"],
+        weeks.map((w) => ({ cells: [wk(w), w.average_lb !== null && w.average_lb !== undefined ? lb(w.average_lb) + " lb" : "No weigh-ins", String(w.days),
+          w.calorie_days ? fmt(w.calories_average) + " (" + w.calorie_days + " days)" : "–"] })), { num: [1, 2, 3] }));
+      body.append(approxKey);
+    }
+    body.append(notes(r.since_start ? "Since the start: " + r.since_start.says : null,
+      "Each day's weight is its first weigh-in. A day without a weigh-in is a gap, never zero."));
+  }
+
   // Keyed by the connector's report action names
   const show = {
     nutrition_report: nutrition,
@@ -313,6 +357,7 @@ const Views = (() => {
     training_volume: sets,
     workout_frequency: workouts,
     nutrition_vs_performance: nutritionLifts,
+    body_weight_report: bodyWeight,
   };
   const titles = {
     nutrition_report: "Nutrition",
@@ -322,8 +367,9 @@ const Views = (() => {
     training_volume: "Weekly sets",
     workout_frequency: "Workouts",
     nutrition_vs_performance: "Nutrition and lifts",
+    body_weight_report: "Body weight",
   };
 
-  return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles,
+  return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles, reading, readingTime, lb,
     dates: { ymd, parse, addDays, today, short, long, monthName, MON } };
 })();
