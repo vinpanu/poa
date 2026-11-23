@@ -63,18 +63,19 @@ const Views = (() => {
     return h("div", { class: "key" }, items);
   }
 
-  // Draw now and again when the width changes (a window resize, or the card's frame changing size)
-  let redraw = null;
+  // Draw now and again when the width changes (a window resize, or the card's frame changing size). A page with several
+  // charts (the exercise section, an exercise's page) keeps each one's drawing; a new page starts the list again.
+  let redraws = [];
   let resizeTimer = null;
   let lastWidth = window.innerWidth;
   window.addEventListener("resize", () => {
     if (window.innerWidth === lastWidth) return;
     lastWidth = window.innerWidth;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => redraw && redraw(), 150);
+    resizeTimer = setTimeout(() => redraws.forEach((f) => f()), 150);
   });
-  function draw(fn) { redraw = fn; fn(); }
-  function stopDraw() { redraw = null; }
+  function draw(fn) { redraws.push(fn); fn(); }
+  function stopDraw() { redraws = []; }
 
   // The connector's weight meanings (load_meaning)
   const LOAD_NOTE = { bar_total: "Weight includes the bar.", per_dumbbell: "Weight is per dumbbell.", stack: "Weight is the machine's stack.",
@@ -255,31 +256,6 @@ const Views = (() => {
       r.counting));
   }
 
-  function workouts(body, r, o) {
-    stopDraw();
-    const weeks = r.weeks || [];
-    if (!weeks.length) { body.append(notes("No workouts in this period.")); return; }
-    const listText = (w) => (w.list || []).map((x) => long(x.date) + (x.label ? ", " + x.label : "") + (x.length_min ? ", " + x.length_min + " min" : "") + ", " + x.working_sets + " sets").join("\n");
-    if (o.view === "graph") {
-      const a = chartBox("Workouts per week", "Monday to Sunday");
-      const b = chartBox("Minutes trained per week", "Timed workouts only");
-      body.append(a.node);
-      const timed = weeks.some((w) => w.timed_minutes);
-      if (timed) body.append(b.node);
-      draw(() => {
-        Charts.columns(a.plot, { aria: "Workouts per week", points: weeks.map((w) => ({ label: "Week of " + short(w.week_start), short: short(w.week_start), value: w.workouts,
-          tip: "Week of " + short(w.week_start) + "\n" + listText(w) + (w.note ? "\n" + w.note : "") })) });
-        // A week without timed workouts is zero minutes, never missing data (REQ-RPT-005 example 5)
-        if (timed) Charts.columns(b.plot, { aria: "Minutes trained per week", points: weeks.map((w) => ({ label: "Week of " + short(w.week_start), short: short(w.week_start), value: w.timed_minutes || 0,
-          tip: "Week of " + short(w.week_start) + "\n" + (w.timed_minutes || 0) + " minutes timed" })) });
-      });
-    } else {
-      body.append(table(["Week", "Workouts", "Minutes", "Each workout"],
-        weeks.map((w) => ({ cells: ["Week of " + short(w.week_start), String(w.workouts), w.timed_minutes ? String(w.timed_minutes) : "", h("span", { class: "small" }, ...listText(w).split("\n").flatMap((l, i) => i ? [h("br"), l] : [l]))] })), { num: [1, 2] }));
-    }
-    body.append(notes(...weeks.filter((w) => w.note).map((w) => "Week of " + short(w.week_start) + ": " + w.note), r.rule));
-  }
-
   function nutritionLifts(body, r, o) {
     stopDraw();
     const weeks = r.weeks || [];
@@ -348,6 +324,184 @@ const Views = (() => {
       "Each day's weight is its first weigh-in. A day without a weigh-in is a gap, never zero."));
   }
 
+  // ---------------------------------------------------------------- the exercise pages (REQ-WEB-016 to 021)
+  // Every set is shown as the database words it (REQ-WEB-018): the weight with its meaning, the reps and the reps in
+  // reserve, an assumed value drawn differently (REQ-LOG-007), each weight of a drop set on its own line, and marks.
+  // The counting rules are the database's (migration 065); these views only show what the reads give.
+
+  const cap = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+  const dayComma = (s) => { const d = parse(s); return DOW[d.getDay()] + ", " + MON[d.getMonth()] + " " + d.getDate(); };
+  const exHref = (id) => "#/ex/" + id;
+  const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+  // A week's label: "Nov 2–8", or with its days when the period's edge cuts it, "Nov 14–15 (2 days)"
+  function weekLabel(w) {
+    const a = parse(w.from || w.week_start), b = parse(w.to || addDays(w.week_start, 6));
+    const span = a.getTime() === b.getTime() ? short(w.from) : a.getMonth() === b.getMonth()
+      ? MON[a.getMonth()] + " " + a.getDate() + "–" + b.getDate() : short(w.from) + "–" + short(w.to);
+    const days = w.days || 7;
+    return span + (days < 7 ? " (" + plural(days, "day") + ")" : "");
+  }
+  const star = (w) => (w.note ? " *" : "");
+
+  // One logged set (label "Set 2", or "Warm-up"); s is a set with its display, or a display itself
+  function setItem(s, label) {
+    const d = s.display || s;
+    const lines = d.lines || [];
+    const rir = d.rir ? h("span", { class: d.rir_assumed ? "assumed" : null }, " · " + d.rir) : null;
+    const tags = (d.marks || []).filter((m) => m !== "warm-up").map((m) => h("span", { class: "tag" }, m));
+    const lab = h("span", { class: "muted" }, (d.warm_up ? "Warm-up" : label) + ": ");
+    if (lines.length > 1) {
+      return h("li", {}, lab, h("ul", { class: "drops" }, lines.map((l, k) => h("li", {}, l.text, k === lines.length - 1 ? rir : null,
+        l.mark ? h("span", { class: "tag" }, l.mark) : null))), ...tags);
+    }
+    return h("li", {}, lab, lines.length ? lines[0].text : "", rir, ...tags);
+  }
+  // Every set of an exercise in a workout, numbered among the working sets
+  function setList(sets) {
+    let n = 0;
+    return h("ol", { class: "sets" }, (sets || []).map((s) => setItem(s, "Set " + ((s.display || s).warm_up ? 0 : ++n))));
+  }
+  const nothing = () => h("p", { class: "muted small" }, "Nothing logged in this period.");
+
+  // Exercises (REQ-WEB-016): every exercise he has logged, the most recently done first
+  function exerciseList(body, r) {
+    const xs = r.exercises || [];
+    if (!xs.length) { body.append(notes("No exercises logged yet.")); return; }
+    body.append(h("div", { class: "list" }, xs.map((x) => h("a", { class: "row-link", href: exHref(x.exercise_id) },
+      h("span", { class: "s-main" }, h("span", { class: "s-title" }, cap(x.exercise)),
+        h("span", { class: "s-sub" }, [x.muscle_groups && x.muscle_groups.length ? x.muscle_groups.map(cap).join(", ") : "Muscle groups not confirmed yet",
+          "last done " + dayComma(x.last_done), plural(x.workouts_in_period, "workout") + " in this period"].join(" · "))),
+      h("span", { class: "s-right" }, "›")))));
+  }
+
+  // Personal records across all his exercises (REQ-WEB-016): newest first, each opening its exercise's page
+  function recordsList(body, r) {
+    const rs = r.records || [];
+    if (!rs.length) { body.append(h("p", { class: "muted small" }, "No new records in this period.")); return; }
+    body.append(h("div", { class: "list" }, rs.slice(0, 12).map((x) => h("a", { class: "row-link", href: exHref(x.exercise_id) },
+      h("span", { class: "s-main" }, h("span", { class: "s-title" }, cap(x.exercise)),
+        h("span", { class: "s-sub" }, x.says + " · " + dayComma(x.date) + " · " + (x.heavier_for_reps ? "heaviest for " + x.reps + " reps" : "most reps at this weight"))),
+      h("span", { class: "s-right" }, "›")))));
+    if (rs.length > 12) body.append(h("p", { class: "tiny muted" }, (rs.length - 12) + " more in this period."));
+    body.append(notes(r.rule));
+  }
+
+  // Working sets by muscle group (REQ-WEB-020): the group picked, each week's count opening to every set, numbered
+  function muscleGroupSets(body, r, o) {
+    const weeks = r.weeks || [];
+    if (o.onPick) {
+      body.append(h("div", { class: "mg-pick", role: "group", "aria-label": "Muscle group" }, (r.groups || []).map((g) =>
+        h("button", { type: "button", class: "btn", "aria-pressed": String(g === r.muscle_group), onclick: () => { if (g !== r.muscle_group) o.onPick(g); } }, cap(g)))));
+    }
+    const total = weeks.reduce((a, w) => a + w.working_sets, 0);
+    if (o.view === "graph") {
+      if (!total) { body.append(nothing()); } else {
+        const box = chartBox(cap(r.muscle_group) + ": working sets per week", "Monday to Sunday");
+        body.append(box.node);
+        draw(() => Charts.columns(box.plot, { aria: "Working sets per week for " + r.muscle_group,
+          points: weeks.map((w) => ({ label: weekLabel(w), short: short(w.from), value: w.working_sets,
+            tip: weekLabel(w) + "\n" + plural(w.working_sets, "working set") + (w.note ? "\n" + w.note : "") })) }));
+      }
+    } else {
+      body.append(h("div", { class: "list" }, weeks.slice().reverse().map((w) => h("details", { class: "row" },
+        h("summary", {}, h("span", { class: "s-main" }, h("span", { class: "s-title" }, weekLabel(w))), h("span", { class: "s-right" }, String(w.working_sets) + star(w))),
+        h("div", { class: "inner" }, w.sets.length
+          ? h("ol", { class: "sets numbered" }, w.sets.map((s) => h("li", {}, h("a", { href: "#/day/" + s.date }, dayComma(s.date)), " · ",
+              h("a", { href: exHref(s.exercise_id) }, cap(s.exercise)), " · " + s.says + (s.drop_part ? " (drop " + s.drop_part + ")" : ""))))
+          : h("p", { class: "muted small" }, "No " + r.muscle_group + " sets this week."))))));
+    }
+    body.append(notes(...weeks.filter((w) => w.note).map((w) => weekLabel(w) + ": " + w.note), r.rule));
+  }
+
+  // Workouts (REQ-WEB-021): how many each week and how long each took; open and not-timed workouts aren't averaged
+  const lengthText = (x) => (x.timing === "open" ? "open" : x.length_min !== null && x.length_min !== undefined ? x.length_min + " min" : "not timed");
+  function workouts(body, r, o) {
+    const weeks = r.weeks || [];
+    const total = weeks.reduce((a, w) => a + w.workouts, 0);
+    const avgText = (w) => (w.average_min !== null && w.average_min !== undefined ? "average " + w.average_min + " min" : "no timed workout");
+    if (o.view === "graph") {
+      if (!total) { body.append(nothing()); } else {
+        const a = chartBox("Workouts per week", "Monday to Sunday");
+        body.append(a.node);
+        draw(() => Charts.columns(a.plot, { aria: "Workouts per week", points: weeks.map((w) => ({ label: weekLabel(w), short: short(w.from || w.week_start),
+          value: w.workouts, tip: weekLabel(w) + "\n" + plural(w.workouts, "workout") + ", " + avgText(w) + (w.note ? "\n" + w.note : "") })) }));
+      }
+    } else {
+      body.append(h("div", { class: "list" }, weeks.slice().reverse().map((w) => h("details", { class: "row" },
+        h("summary", {}, h("span", { class: "s-main" }, h("span", { class: "s-title" }, weekLabel(w)), h("span", { class: "s-sub" }, cap(avgText(w)))),
+          h("span", { class: "s-right" }, String(w.workouts) + star(w))),
+        h("div", { class: "inner" }, (w.list || []).length
+          ? (w.list || []).map((x) => h("div", { class: "wo" }, h("a", { href: "#/day/" + x.date }, dayComma(x.date)),
+              h("span", { class: "muted small" }, " · " + lengthText(x) + " · " + plural(x.working_sets, "working set"))))
+          : h("p", { class: "muted small" }, "No workouts this week."))))));
+    }
+    body.append(notes(...weeks.filter((w) => w.note).map((w) => weekLabel(w) + ": " + w.note), r.rule));
+  }
+
+  // One exercise's page (REQ-WEB-017): Progress, Personal records, Working sets per week, Every workout
+  function exercisePage(body, r, o) {
+    const sec = (title, sub, ...kids) => { const s = h("section", { class: "card report" }, h("h2", {}, title), sub ? h("p", { class: "muted small" }, sub) : null, ...kids); body.append(s); return s; };
+    const lastDone = r.last_done ? "Last done " + dayComma(r.last_done) + "." : "";
+    const none = h("p", { class: "muted small" }, "Nothing logged in this period. " + lastDone);
+    const prog = (r.progress || []).filter((w) => w.best_set);
+    const s1 = sec("Progress", "The best set of each workout: the heaviest working set, more reps breaking a tie; and the weight moved");
+    if (!prog.length) s1.append(none.cloneNode(true));
+    else if (o.view === "graph") {
+      const a = chartBox("Best set: " + r.exercise, null);
+      const moved = prog.some((w) => w.weight_moved);
+      const b = chartBox("Weight moved", "Every working rep at its weight");
+      s1.append(a.node);
+      if (moved) s1.append(b.node);
+      draw(() => {
+        Charts.line(a.plot, { aria: "Best set of " + r.exercise + " by workout", points: prog.map((w) => ({ label: dayComma(w.date), short: short(w.date),
+          value: w.best_set.load, tip: dayComma(w.date) + "\n" + w.best_set.says + "\n" + plural(w.working_sets, "working set") })) });
+        if (moved) Charts.columns(b.plot, { aria: "Weight moved by workout", points: prog.map((w) => ({ label: dayComma(w.date), short: short(w.date),
+          value: w.weight_moved, tip: dayComma(w.date) + "\n" + fmt(w.weight_moved) + " lb moved" })) });
+      });
+    } else {
+      s1.append(table(["Workout", "Best set", "Working sets", "Weight moved"], prog.slice().reverse().map((w) => ({
+        cells: [dayComma(w.date), w.best_set.says, String(w.working_sets), w.weight_moved !== null && w.weight_moved !== undefined ? fmt(w.weight_moved) + " lb" : "–"] })), { num: [2, 3] }));
+    }
+    const rec = r.records || {};
+    const byReps = (rec.by_reps || []).slice().sort((x, y) => x.reps - y.reps);
+    const byLoad = (rec.by_load || []).slice();
+    sec("Personal records", "In the period chosen, with the day each was first set. Working sets only; no estimated one-rep max.",
+      byReps.length ? [h("h3", {}, "Heaviest weight for each number of reps"),
+        table(["Reps", "Heaviest", "Day"], byReps.map((x) => ({ cells: [String(x.reps), x.says, dayComma(x.date)] })), { num: [0] }),
+        h("h3", {}, "Most reps at each weight"),
+        table(["Weight", "Most reps", "Day"], byLoad.map((x) => ({ cells: [x.says.replace(/ × \d+$/, ""), String(x.reps), dayComma(x.date)] })), { num: [1] })]
+        : none.cloneNode(true));
+    const weeks = r.weeks || [];
+    const s3 = sec("Working sets per week", "Monday to Sunday; a week cut by the period's edge says how many days it covers");
+    if (o.view === "graph") {
+      if (!weeks.some((w) => w.working_sets)) s3.append(none.cloneNode(true));
+      else {
+        const c = chartBox("Working sets of " + r.exercise + " per week", null);
+        s3.append(c.node);
+        draw(() => Charts.columns(c.plot, { aria: "Working sets per week", points: weeks.map((w) => ({ label: weekLabel(w), short: short(w.from),
+          value: w.working_sets, tip: weekLabel(w) + "\n" + plural(w.working_sets, "working set") + (w.note ? "\n" + w.note : "") })) }));
+      }
+    } else {
+      s3.append(table(["Week", "Working sets"], weeks.map((w) => ({ cells: [weekLabel(w), String(w.working_sets) + star(w)] })), { num: [1] }));
+    }
+    const ws = r.workouts || [];
+    const s4 = sec("Every workout", "Newest first, back to the start of the period; tap a workout for its sets");
+    if (!ws.length) s4.append(none.cloneNode(true));
+    else {
+      s4.append(h("div", { class: "list" }, ws.map((w) => h("details", { class: "row" },
+        h("summary", {}, h("span", { class: "s-main" }, h("span", { class: "s-title" }, dayComma(w.date)),
+          h("span", { class: "s-sub short" }, (w.entries || []).map((e) => e.short).join(", "))),
+          h("span", { class: "s-right" }, plural(w.working_sets, "set"))),
+        h("div", { class: "inner" },
+          (w.entries || []).flatMap((e) => [e.replaces ? h("p", { class: "small" }, h("span", { class: "tag" }, "instead of " + e.replaces)) : null, setList(e.sets)]),
+          w.best_set ? h("p", { class: "small muted" }, "Best set: " + w.best_set) : h("p", { class: "small muted" }, "No best set: warm-ups only"),
+          h("a", { class: "ex-link", href: "#/day/" + w.date }, "Open the day ›"))))));
+      if (r.more_before && o.more) s4.append(h("button", { type: "button", class: "btn", onclick: o.more }, "Show earlier workouts"));
+      else s4.append(h("p", { class: "tiny muted" }, "That's every workout back to the start of the period."));
+    }
+    body.append(notes(LOAD_NOTE[r.load_meaning], r.note));
+  }
+
   // Keyed by the connector's report action names
   const show = {
     nutrition_report: nutrition,
@@ -358,6 +512,10 @@ const Views = (() => {
     workout_frequency: workouts,
     nutrition_vs_performance: nutritionLifts,
     body_weight_report: bodyWeight,
+    exercise_list: exerciseList,
+    records_report: recordsList,
+    muscle_group_sets: muscleGroupSets,
+    exercise_page: exercisePage,
   };
   const titles = {
     nutrition_report: "Nutrition",
@@ -366,10 +524,14 @@ const Views = (() => {
     personal_records: "Personal records",
     training_volume: "Weekly sets",
     workout_frequency: "Workouts",
-    nutrition_vs_performance: "Nutrition and lifts",
+    nutrition_vs_performance: "Calories and macros against performance",
     body_weight_report: "Body weight",
+    exercise_list: "Exercises",
+    records_report: "Personal records",
+    muscle_group_sets: "Working sets by muscle group",
+    exercise_page: "Exercise",
   };
 
-  return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles, reading, readingTime, lb,
+  return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles, reading, readingTime, lb, setItem, setList, dayComma, exHref,
     dates: { ymd, parse, addDays, today, short, long, monthName, MON } };
 })();

@@ -72,12 +72,24 @@ function setPref(key, value) {
 
 const PERIODS = [["day", "Day", 1], ["1w", "1 week", 7], ["1m", "1 month", 30], ["3m", "3 months", 90],
   ["6m", "6 months", 180], ["1y", "1 year", 365], ["custom", "Custom", 0]];
-let periodEnd = null; // where the arrows have moved the period's end; null is today, where every visit starts
+// An exercise's page has its own period: it opens on 3 months, and all time goes back to his first log of it (REQ-WEB-017)
+const EX_PERIODS = [...PERIODS.filter((x) => x[0] !== "custom"), ["all", "All time", 0]];
+// where the arrows have moved each period's end; null is today, where every visit starts
+const periodEnds = { period: null, ex: null };
 
 const ymdParts = (s) => { const [y, m, d] = s.split("-").map(Number); return [y, m - 1, d]; };
 const daysBetween = (a, b) => Math.round((Date.UTC(...ymdParts(b)) - Date.UTC(...ymdParts(a))) / 864e5);
 
-function period() {
+function period(scope = "period") {
+  if (scope === "ex") {
+    let per = pref("exPeriod", "3m");
+    if (!EX_PERIODS.some((x) => x[0] === per)) per = "3m";
+    if (per === "all") return { per, all: true, from: null, to: today(), len: 0 };
+    const len = EX_PERIODS.find((x) => x[0] === per)[2];
+    const end = periodEnds.ex && periodEnds.ex < today() ? periodEnds.ex : today();
+    return { per, from: addDays(end, -(len - 1)), to: end, len };
+  }
+  const periodEnd = periodEnds.period;
   let per = pref("period", "1m");
   if (!PERIODS.some((x) => x[0] === per)) per = "1m";
   if (per === "custom") {
@@ -92,8 +104,9 @@ function period() {
   return { per, from: addDays(end, -(len - 1)), to: end, len };
 }
 
-function shiftPeriod(dir) {
-  const p = period();
+function shiftPeriod(dir, scope = "period") {
+  const p = period(scope);
+  if (p.all) return;
   if (p.per === "custom") {
     let from = addDays(p.from, dir * p.len);
     let to = addDays(p.to, dir * p.len);
@@ -102,7 +115,7 @@ function shiftPeriod(dir) {
     setPref("to", to);
   } else {
     const end = addDays(p.to, dir * p.len);
-    periodEnd = end >= today() ? null : end;
+    periodEnds[scope] = end >= today() ? null : end;
   }
 }
 
@@ -110,6 +123,7 @@ function rangeLabel(p) {
   const { MON, parse } = Views.dates;
   const md = (s) => { const d = parse(s); return MON[d.getMonth()] + " " + d.getDate(); };
   const y = (s) => s.slice(0, 4);
+  if (p.all) return p.from ? "All time, since " + md(p.from) + (y(p.from) !== y(today()) ? ", " + y(p.from) : "") : "All time";
   if (p.len === 1) return (p.to === today() ? "Today, " : "") + Pages.dayShort(p.to) + (y(p.to) !== y(today()) ? ", " + y(p.to) : "");
   if (y(p.from) !== y(p.to)) return md(p.from) + ", " + y(p.from) + " – " + md(p.to) + ", " + y(p.to);
   return md(p.from) + " – " + md(p.to) + (y(p.to) !== y(today()) ? ", " + y(p.to) : "");
@@ -164,15 +178,16 @@ async function micronutrients() {
 
 // ------------------------------------------------------------------ controls
 
-function periodControls(rerender) {
-  const p = period();
-  const chips = h("div", { class: "pers", role: "group", "aria-label": "Period" }, PERIODS.map(([v, t]) =>
+function periodControls(rerender, scope = "period", shown) {
+  const p = shown || period(scope);
+  const list = scope === "ex" ? EX_PERIODS : PERIODS;
+  const chips = h("div", { class: "pers", role: "group", "aria-label": "Period" }, list.map(([v, t]) =>
     h("button", { type: "button", class: "per", "aria-pressed": String(v === p.per),
-      onclick: () => { setPref("period", v); periodEnd = null; rerender(); } }, t)));
-  const back = h("button", { type: "button", class: "arrow", "aria-label": "Previous period", title: "Previous period",
-    onclick: () => { shiftPeriod(-1); rerender(); } }, "‹");
-  const fwd = h("button", { type: "button", class: "arrow", "aria-label": "Next period", title: "Next period", disabled: p.to >= today(),
-    onclick: () => { shiftPeriod(1); rerender(); } }, "›");
+      onclick: () => { setPref(scope === "ex" ? "exPeriod" : "period", v); periodEnds[scope] = null; rerender(); } }, t)));
+  const back = h("button", { type: "button", class: "arrow", "aria-label": "Previous period", title: "Previous period", disabled: !!p.all,
+    onclick: () => { shiftPeriod(-1, scope); rerender(); } }, "‹");
+  const fwd = h("button", { type: "button", class: "arrow", "aria-label": "Next period", title: "Next period", disabled: !!p.all || p.to >= today(),
+    onclick: () => { shiftPeriod(1, scope); rerender(); } }, "›");
   const out = h("div", { class: "period" }, chips, h("div", { class: "rangebar" }, back, h("span", { class: "range-t" }, rangeLabel(p)), fwd));
   if (p.per === "custom") {
     out.append(h("div", { class: "custom" },
@@ -232,46 +247,6 @@ async function sourcesPage(body, rerender) {
   Views.show.nutrient_sources(body, r, view());
 }
 
-async function progressPage(body, rerender) {
-  const list = await exercises();
-  if (!list.length) { body.append(notes("No exercises logged yet.")); return; }
-  body.append(h("div", { class: "controls" }, ...periodControls(rerender), exerciseSelect(list, "exercise", rerender), viewSwitch(rerender)));
-  const { from, to } = period();
-  const r = await call("exercise_progress", { exercise_id: pref("exercise", list[0].exercise_id), from, to });
-  Views.show.exercise_progress(body, r, { ...view(), from, to });
-}
-
-async function recordsPage(body, rerender) {
-  const list = await exercises();
-  if (!list.length) { body.append(notes("No exercises logged yet.")); return; }
-  body.append(h("div", { class: "controls" }, ...periodControls(rerender), exerciseSelect(list, "exercise", rerender), viewSwitch(rerender)));
-  const { from, to } = period();
-  const r = await call("personal_records", { exercise_id: pref("exercise", list[0].exercise_id), from, to });
-  Views.show.personal_records(body, r, view());
-}
-
-async function setsPage(body, rerender) {
-  const by = pref("setsBy", "muscle_group");
-  const pick = pref("setsPick", "");
-  const { from, to } = period();
-  const r = await call("training_volume", { by, from, to });
-  const names = Views.setNames(r);
-  const chosen = names.includes(pick) ? pick : "";
-  body.append(h("div", { class: "controls" }, ...periodControls(rerender),
-    field("By", seg([["muscle_group", "Muscle group"], ["exercise", "Exercise"]], by, (v) => { setPref("setsBy", v); setPref("setsPick", ""); rerender(); }, "By muscle group or exercise")),
-    field(by === "muscle_group" ? "Muscle group" : "Exercise", h("select", { onchange: (e) => { setPref("setsPick", e.target.value); rerender(); } },
-      h("option", { value: "", selected: !chosen }, "All"), names.map((n) => h("option", { value: n, selected: n === chosen }, n)))),
-    viewSwitch(rerender)));
-  Views.show.training_volume(body, r, { ...view(), by, pick: chosen, from, to });
-}
-
-async function workoutsPage(body, rerender) {
-  body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender)));
-  const { from, to } = period();
-  const r = await call("workout_frequency", { from, to });
-  Views.show.workout_frequency(body, r, view());
-}
-
 async function nutritionLiftsPage(body, rerender) {
   const list = await exercises();
   if (!list.length) { body.append(notes("No exercises logged yet.")); return; }
@@ -300,13 +275,48 @@ const NUTRITION_REPORTS = [
   { path: "nutrition", title: "Nutrients over time", blurb: "Calories, protein, carbs, fat and any micronutrient, by day, week or month", render: nutritionPage },
   { path: "sources", title: "Where it comes from", blurb: "The foods that gave you the most of a nutrient", render: sourcesPage },
 ];
+// The exercise reports sit in Reports' Exercise section (REQ-WEB-016); lift progress moved onto each exercise's page.
+// Calories and macros against performance keeps its own page.
 const EXERCISE_REPORTS = [
-  { path: "progress", title: "Lift progress", blurb: "Your best set in each workout, and weight moved", render: progressPage },
-  { path: "records", title: "Personal records", blurb: "Heaviest weight for each number of reps, and most reps at each weight", render: recordsPage },
-  { path: "sets", title: "Weekly sets", blurb: "Working sets per week by muscle group or exercise", render: setsPage },
-  { path: "workouts", title: "Workouts", blurb: "Workouts per week and how long they took", render: workoutsPage },
-  { path: "nutrition-lifts", title: "Nutrition and lifts", blurb: "A nutrient's weekly average beside your best set", render: nutritionLiftsPage },
+  { path: "nutrition-lifts", title: "Calories and macros against performance", blurb: "A nutrient's weekly average beside your best set", render: nutritionLiftsPage },
 ];
+// The old addresses of the exercise reports open the Exercise section
+const OLD_EXERCISE_PATHS = ["progress", "records", "sets", "workouts"];
+
+// Reports' Exercise section (REQ-WEB-016), in this order: Exercises, Personal records, Working sets by muscle group,
+// Workouts, then (once there is a plan, card POABUILD-96) Sets against the plan, and Calories and macros against
+// performance. Each covers the period chosen, with a graph or text where it draws one.
+async function exerciseSection(body, rerender) {
+  body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender)));
+  const { from, to } = period();
+  const mg = pref("mg", "");
+  const [xs, recs, sets, wf] = await Promise.all([call("exercise_list", { from, to }), call("records_report", { from, to }),
+    call("muscle_group_sets", mg ? { from, to, muscle_group: mg } : { from, to }), call("workout_frequency", { from, to })]);
+  const sec = (title, sub) => { const s = h("section", { class: "card report" }, h("h2", {}, title), sub ? h("p", { class: "muted small" }, sub) : null); body.append(s); return s; };
+  Views.show.exercise_list(sec("Exercises", "Every exercise you have logged, the most recently done first. Tap one for its progress, records and every workout."), xs, view());
+  Views.show.records_report(sec("Personal records", "Records set in this period across all your exercises, newest first"), recs, view());
+  Views.show.muscle_group_sets(sec("Working sets by muscle group", "Per week, Monday to Sunday. Pick a muscle group; in the text, tap a week for every set."), sets,
+    { ...view(), onPick: (g) => { setPref("mg", g); rerender(); } });
+  Views.show.workout_frequency(sec("Workouts", "How many each week and how long each took. A workout not timed, or still open, isn't in the average."), wf, view());
+  body.append(tiles(EXERCISE_REPORTS));
+}
+
+// An exercise's page (REQ-WEB-017): Progress, Personal records, Working sets per week and Every workout, a few
+// workouts at a time back to the start of the period
+let exShown = { id: null, limit: 5 };
+async function exercisePage(body, id, rerender) {
+  if (exShown.id !== id) exShown = { id, limit: 5 };
+  const p = period("ex");
+  const args = p.all ? { exercise_id: id, all_time: true, limit: exShown.limit } : { exercise_id: id, from: p.from, to: p.to, limit: exShown.limit };
+  const r = await call("exercise_page", args);
+  const shown = p.all ? { ...p, from: r.from } : p;
+  body.append(h("h1", {}, Pages.cap ? Pages.cap(r.exercise) : r.exercise),
+    h("p", { class: "muted small" }, [r.muscle_groups && r.muscle_groups.length ? r.muscle_groups.join(", ") : "Muscle groups not confirmed yet",
+      r.last_done ? "last done " + Views.dayComma(r.last_done) : null,
+      r.other_names && r.other_names.length ? "also called " + r.other_names.join(", ") : null].filter(Boolean).join(" · ")),
+    h("div", { class: "controls" }, ...periodControls(() => { exShown.limit = 5; rerender(); }, "ex", shown), viewSwitch(rerender)));
+  Views.show.exercise_page(body, r, { ...view(), more: () => { exShown.limit += 5; rerender(); } });
+}
 // Body weight comes after nutrition and exercise (REQ-WEB-013, REQ-BW-008)
 const BODY_REPORTS = [
   { path: "weight", title: "Body weight", blurb: "Your weight by day and week, every weigh-in, and weight beside calories", render: weightPage },
@@ -361,7 +371,7 @@ let reportSection = "nut";
 async function reportsPage(body, rerender) {
   body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"], ["bw", "Body weight"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition, exercise or body weight")));
   if (reportSection === "ex") {
-    body.append(h("p", { class: "muted small" }, "Each report covers any period, with a graph or text."), tiles(EXERCISE_REPORTS));
+    await exerciseSection(body, rerender);
     return;
   }
   if (reportSection === "bw") {
@@ -469,13 +479,15 @@ function parseRoute() {
   if (path === "history") return { kind: "history" };
   if ((m = /^day\/(\d{4}-\d{2}-\d{2})$/.exec(path))) return { kind: "history", date: m[1] };
   if (path === SECURITY.path) return { kind: "security" };
+  if ((m = /^ex\/([0-9a-zA-Z-]+)$/.exec(path))) return { kind: "exercise", id: m[1] };
   const name = (m = /^r\/([a-z-]+)$/.exec(path)) ? m[1] : path; // the old addresses (#/nutrition) still open their report
+  if (OLD_EXERCISE_PATHS.includes(name)) { reportSection = "ex"; return { kind: "reports" }; }
   const page = PAGES.find((p) => p.path === name);
   return page ? { kind: "report", page } : { kind: "home" };
 }
 
 function setTabs(kind) {
-  const here = kind === "report" ? "reports" : kind;
+  const here = kind === "report" || kind === "exercise" ? "reports" : kind;
   for (const a of $("tabs").querySelectorAll("a")) a.setAttribute("aria-current", a.dataset.tab === here ? "page" : "false");
 }
 
@@ -491,6 +503,7 @@ async function route() {
   const inner = h("div", {});
   const rerender = () => route();
   if (rt.kind === "report") body.append(h("p", { class: "crumb" }, h("a", { href: "#/reports" }, "‹ Reports")), h("h1", {}, rt.page.title));
+  else if (rt.kind === "exercise") { reportSection = "ex"; body.append(h("p", { class: "crumb" }, h("a", { href: "#/reports" }, "‹ Exercises"))); }
   else if (rt.kind === "reports") body.append(h("h1", {}, "Reports"));
   else if (rt.kind === "history") body.append(h("h1", {}, "History"));
   else if (rt.kind === "security") body.append(h("h1", {}, SECURITY.title));
@@ -501,6 +514,7 @@ async function route() {
     else if (rt.kind === "history") await historyPage(inner, rt.date);
     else if (rt.kind === "reports") await reportsPage(inner, rerender);
     else if (rt.kind === "security") await securityPage(inner);
+    else if (rt.kind === "exercise") await exercisePage(inner, rt.id, rerender);
     else await rt.page.render(inner, rerender);
     if (mine === renderToken) say("");
   } catch (err) {

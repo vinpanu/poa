@@ -143,10 +143,13 @@ const Pages = (() => {
   }
 
   // A set's says text is the coach's read-back ("185 lb, bar included, 8 reps, 2 in reserve", and "(assumed, your
-  // default)" when the reps in reserve were assumed); add only what it lacks (CR1-D010, POABUILD-67)
-  const rirText = (s) => (s.rir === null || s.rir === undefined || /in reserve/.test(s.says || "") ? ""
+  // default)" when the reps in reserve were assumed), or since migration 066 the website's words ("185 lb, bar
+  // included × 8 · 2 RIR"); add only what it lacks (CR1-D010, POABUILD-67)
+  const rirText = (s) => (s.rir === null || s.rir === undefined || /in reserve|RIR/.test(s.says || "") ? ""
     : " · " + s.rir + " in reserve") + (s.rir_basis === "assumed" && !/assumed/i.test(s.says || "") ? " (assumed)" : "");
   function setLine(s, i) {
+    // Since migration 066 each set carries its display: the weight's meaning, reps, reps in reserve and marks (REQ-WEB-018)
+    if (s.display) return Views.setItem(s, "Set " + i);
     const kind = s.set_kind === "warm_up" ? "Warm-up" : "Set " + i;
     const tech = s.technique === "rest_pause" && !/rest/i.test(s.says || "") ? " · rest-pause" : "";
     return h("li", {}, h("span", { class: "muted" }, kind + ": "), (s.says || "") + rirText(s) + tech + (s.with_partials && !/partial/i.test(s.says || "") ? " · with partials" : ""));
@@ -170,10 +173,16 @@ const Pages = (() => {
         h("div", { class: "list" }, (w.exercises || []).map((x) => {
           let n = 0;
           const working = (x.sets || []).filter((s) => s.set_kind !== "warm_up").reduce((a, s) => a + (s.counts_as || 0), 0);
+          // Before it is opened, the row shows each set short, keeping the warm-up mark (REQ-WEB-018); a swap says what
+          // it replaced; below the sets, a link opens the exercise's own page (REQ-WEB-017)
           return row([
-            h("span", { class: "s-main" }, h("span", { class: "s-title" }, cap(x.exercise)), x.setup ? h("span", { class: "s-sub" }, x.setup) : null),
+            h("span", { class: "s-main" }, h("span", { class: "s-title" }, cap(x.exercise)),
+              x.replaces ? h("span", { class: "s-sub" }, h("span", { class: "tag" }, "instead of " + x.replaces)) : null,
+              x.short ? h("span", { class: "s-sub short" }, x.short) : null,
+              x.setup ? h("span", { class: "s-sub" }, x.setup) : null),
             h("span", { class: "s-right" }, plural(working, "set")),
-          ], [h("ol", { class: "sets" }, (x.sets || []).map((s) => setLine(s, s.set_kind === "warm_up" ? 0 : ++n)))]);
+          ], [h("ol", { class: "sets" }, (x.sets || []).map((s) => setLine(s, s.set_kind === "warm_up" ? 0 : ++n))),
+            x.page_exercise_id ? h("a", { class: "ex-link", href: Views.exHref(x.page_exercise_id) }, cap(x.exercise) + ": progress, records and every workout ›") : null]);
         })));
     }));
   }
@@ -331,8 +340,10 @@ const Pages = (() => {
       lw.workouts.count ? h("p", { class: "small" }, h("b", {}, "Last week, same days")) : null, lw.workouts.count ? wlist(lw) : null]);
 
     // Working sets by muscle group, each opening to every set that makes up its count
+    // the exercise's name opens its page (REQ-WEB-017)
     const setList = (sets) => h("ol", { class: "sets numbered" }, (sets || []).map((s) => h("li", {},
-      h("a", { href: "#/day/" + s.date }, dow(s.date)), " · " + cap(s.exercise) + " · " + s.says
+      h("a", { href: "#/day/" + s.date }, dow(s.date)), " · ",
+      s.exercise_id ? h("a", { href: Views.exHref(s.exercise_id) }, cap(s.exercise)) : cap(s.exercise), " · " + s.says
         + (s.drop_part ? " (drop " + s.drop_part + ")" : "")
         + rirText(s))));
     const groups = new Map();
@@ -397,5 +408,5 @@ const Pages = (() => {
     if (micro) body.append(card("Nutrients", h("span", { class: "muted small" }, one ? "Day total" : "Average a day"), nutrientTable(micro, one ? "Total" : "Average")));
   }
 
-  return { dayView, weekView, foodSheet, closeSheet, nutritionSummary, macroBar, dayShort, dayLong };
+  return { dayView, weekView, foodSheet, closeSheet, nutritionSummary, macroBar, dayShort, dayLong, cap };
 })();

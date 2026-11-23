@@ -241,3 +241,22 @@ table.nut tr.grp th { padding-top: .7rem; color: var(--text); font-size: .85rem;
 .tabs a { flex: 1; display: grid; justify-items: center; gap: .1rem; padding: .45rem 0 .5rem; text-decoration: none; color: var(--muted); font-size: .75rem; font-weight: 600; }
 .tabs svg { width: 1.45rem; height: 1.45rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tabs a[aria-current="page"] { color: var(--accent); }
+
+/* The exercise pages (REQ-WEB-016 to 021): rows that open an exercise's page, set marks, an assumed value drawn
+   differently (REQ-LOG-007), each weight of a drop set on its own line, and the muscle group picker */
+.row-link { display: flex; gap: .6rem; align-items: center; padding: .6rem 0; border-top: 1px solid var(--grid); text-decoration: none; color: var(--text); min-width: 0; }
+.row-link:first-child { border-top: 0; }
+.row-link .s-main { min-width: 0; flex: 1; display: grid; gap: .1rem; }
+.row-link .s-right { color: var(--muted); }
+.ex-link { display: inline-block; margin-top: .35rem; font-size: .84rem; font-weight: 600; color: var(--accent); text-decoration: none; }
+.ex-link:hover { text-decoration: underline; }
+.tag { display: inline-block; margin-left: .35rem; font-size: .7rem; font-weight: 650; padding: .05rem .35rem; border-radius: 5px; background: var(--grid); color: var(--text-2); white-space: nowrap; }
+.s-sub .tag { margin-left: 0; }
+.assumed { font-style: italic; color: var(--text-2); }
+ul.drops { margin: .15rem 0 0; padding-left: 1.1rem; list-style: none; }
+.s-sub.short { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mg-pick { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
+.mg-pick .btn[aria-pressed="true"] { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.wo { padding: .35rem 0; border-top: 1px solid var(--grid); }
+.wo:first-child { border-top: 0; }
+.card.report h3 { margin: .6rem 0 .2rem; font-size: .9rem; }
