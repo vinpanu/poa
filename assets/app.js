@@ -824,10 +824,6 @@
     flush();
     return `<div class="need-detail">${html}</div>`;
   }
-  function needItem(w) {
-    const href = '#' + slug(w.id);
-    return `<div class="need"><span class="dot${w.blocked ? ' red' : ''}"></span><div class="need-body"><a class="need-head" href="${href}"><b>${esc(w.waiting)}</b><span>${esc([w.name, w.waitingWhen, w.blocked ? 'blocked ' + w.blocked + ' days' : ''].filter(Boolean).join(' · '))}</span></a>${waitingDetail(w.waitingDetail)}</div><a class="go" href="${href}">Open &rsaquo;</a></div>`;
-  }
   function wsCard(w, i) {
     const p = w.progress;
     const bar = p && p.total ? `<div class="bar"><i style="width:${(p.complete / p.total * 100).toFixed(1)}%;background:${pColor(w)}"></i><i style="width:${((p.partial || 0) / p.total * 100).toFixed(1)}%;background:${pColor(w)}55"></i></div>` : '';
@@ -878,7 +874,6 @@
   // ---------- pages ----------
   function pageHome() {
     const ws = workstreams();
-    const needs = ws.filter(w => w.waiting && !w.closed);
     const prog = ws.filter(w => w.progress && w.progress.total).slice(0, 2);
     const active = new Set(ws.filter(w => !w.closed).map(w => w.mission));
     const idle = ['2', '4'].filter(m => !active.has(m));
@@ -905,9 +900,8 @@
         <div class="kpis">${kpis}</div>
       </div></section>
       <div class="wrap">
-        <div class="card rise" id="sec-glance"><h3>Done, now and next</h3><div class="sub">The last two weeks, today and the next four weeks · <a href="#roadmap">Full schedule &rsaquo;</a></div>${glance()}</div>
-        <div class="card rise" id="sec-waiting"><h3>Waiting on Vince</h3><div class="sub">${needs.length ? 'These can’t move without you. Red means no update for three days or more.' : 'Nothing is waiting on you right now'}</div>${needs.map(needItem).join('')}</div>
         ${awarenessCard()}
+        <div class="card rise" id="sec-glance"><h3>Done, now and next</h3><div class="sub">The last two weeks, today and the next four weeks · <a href="#roadmap">Full schedule &rsaquo;</a></div>${glance()}</div>
         <div class="grid g-pair">
           ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
         </div>
@@ -1496,7 +1490,7 @@
   };
 
   // The waiting and workstreams lists live on the Status page; their old addresses open it at that section.
-  const SECTIONS = { status: '', pending: 'sec-pending', glance: 'sec-glance', waiting: 'sec-waiting', workstreams: 'sec-workstreams' };
+  const SECTIONS = { status: '', pending: 'sec-pending', glance: 'sec-glance', waiting: 'sec-pending', workstreams: 'sec-workstreams' };
 
   function render() {
     let route = (location.hash || '#home').slice(1) || 'home';
@@ -1532,8 +1526,8 @@
     if (target) setTimeout(() => { const el = document.getElementById(target); if (el) el.scrollIntoView({ block: 'start' }); }, 0);
     document.title = title + ' · POA';
     markMenu(route);
-    const needs = workstreams().filter(w => w.waiting && !w.closed).length;
-    $('#waitCount').textContent = needs;
+    // One list of what waits on Vince (Vince, 2026-11-23): the top bar counts the pending actions ready now.
+    $('#waitCount').textContent = pending().actions.filter(a => a.state === 'ready').length;
     const built = parseDate(S.bundle.builtAt);
     $('#builtAt').textContent = built ? 'Project data updated ' + fmtLong(built) + ', ' + fmtTime(built) : '';
   }
