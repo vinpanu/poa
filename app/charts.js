@@ -132,10 +132,12 @@ const Charts = (() => {
       el("path", { class: "band", d: "M" + top.join(" L") + " L" + bottom.join(" L") + " Z" }, svg);
       el("path", { class: "band-mid", d: "M" + banded.map(({ p, i }) => xc(i) + "," + y((p.low + p.high) / 2)).join(" L") }, svg);
     }
-    let d = "";
+    // a missing value breaks the line, so a day without a value is a gap, never a point between two (CR1-D018)
+    let d = "", gap = true;
     points.forEach((p, i) => {
-      if (p.value === null || p.value === undefined) return;
-      d += (d ? " L" : "M") + xc(i) + "," + y(p.value);
+      if (p.value === null || p.value === undefined) { gap = true; return; }
+      d += (gap ? (d ? " M" : "M") : " L") + xc(i) + "," + y(p.value);
+      gap = false;
     });
     if (d) el("path", { class: "line", d }, svg);
     points.forEach((p, i) => {
@@ -204,5 +206,58 @@ const Charts = (() => {
     window.addEventListener("scroll", () => { if (!pinned) tip.hidden = true; }, { passive: true });
   }
 
-  return { columns, line, hbars, bindTips, fmt };
+  // Two series on one graph (REQ-RPT-008: weight against calories): columns on the right axis (bar, from zero) and a
+  // line on the left (value), each with its own scale; a missing value is a gap in the line, a missing bar an asterisk.
+  // points: [{label, short, value, bar, barMissing, estimate, tip}]
+  function pair(container, { points, aria, height = 220 }) {
+    const { svg, width } = frame(container, height, aria);
+    const pad = { l: 44, r: 48, t: 16, b: 28 };
+    const innerW = width - pad.l - pad.r;
+    const innerH = height - pad.t - pad.b;
+    const has = (v) => v !== null && v !== undefined;
+    const lv = points.filter((p) => has(p.value)).map((p) => p.value);
+    const bv = points.filter((p) => has(p.bar)).map((p) => p.bar);
+    const yBase = pad.t + innerH;
+    const slot = innerW / Math.max(points.length, 1);
+    const xc = (i) => pad.l + slot * i + slot / 2;
+    let y = null;
+    if (lv.length) {
+      let lo = Math.min(...lv), hi = Math.max(...lv);
+      const spread = hi - lo || Math.max(1, hi * 0.1);
+      lo = Math.max(0, lo - spread * 0.25); hi = hi + spread * 0.25;
+      const tv = ticks(lo, hi);
+      const y0 = tv[0], y1 = tv[tv.length - 1];
+      y = (v) => pad.t + innerH - ((v - y0) / (y1 - y0)) * innerH;
+      yAxis(svg, tv, y, pad.l, width - pad.r);
+    }
+    const bt = ticks(0, Math.max(1, ...bv));
+    const btop = bt[bt.length - 1];
+    const yb = (v) => pad.t + innerH - (v / btop) * innerH;
+    for (const t of bt) el("text", { class: "tick", x: width - pad.r + 6, y: yb(t) + 4, "text-anchor": "start" }, svg, fmt(t));
+    const bw = Math.max(2, Math.min(24, slot * 0.5));
+    points.forEach((p, i) => {
+      const hit = el("rect", { class: "hit", x: pad.l + slot * i, y: pad.t, width: slot, height: innerH, "data-tip": p.tip || "" }, svg);
+      hit.setAttribute("tabindex", "-1");
+      if (!has(p.bar)) {
+        if (p.barMissing) el("text", { class: "miss", x: xc(i), y: yBase - 3, "text-anchor": "middle" }, svg, "*");
+        return;
+      }
+      const h = Math.max(0, yBase - yb(p.bar));
+      if (h > 0) el("path", { class: "bar s2", d: roundedBar(xc(i) - bw / 2, yBase - h, bw, h) }, svg);
+    });
+    if (y) {
+      let d = "", gap = true;
+      points.forEach((p, i) => {
+        if (!has(p.value)) { gap = true; return; }
+        d += (gap ? (d ? " M" : "M") : " L") + xc(i) + "," + y(p.value);
+        gap = false;
+      });
+      el("path", { class: "line", d }, svg);
+      points.forEach((p, i) => { if (has(p.value)) el("circle", { class: "dot" + (p.estimate ? " est" : ""), cx: xc(i), cy: y(p.value), r: 4 }, svg); });
+    }
+    el("line", { x1: pad.l, x2: width - pad.r, y1: yBase, y2: yBase }, el("g", { class: "axis" }, svg));
+    xLabels(svg, points, xc, yBase, slot);
+  }
+
+  return { columns, line, pair, hbars, bindTips, fmt };
 })();
