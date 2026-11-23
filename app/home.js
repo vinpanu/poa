@@ -155,13 +155,18 @@ const Pages = (() => {
     return h("li", {}, h("span", { class: "muted" }, kind + ": "), (s.says || "") + rirText(s) + tech + (s.with_partials && !/partial/i.test(s.says || "") ? " · with partials" : ""));
   }
 
+  // A day marked sick says so where the workout would be (REQ-WEB-002, REQ-LOG-011; CR1-D016)
+  function sickLine(d) {
+    return d.sick ? h("p", { class: "small" }, h("i", { class: "sm" }), " Marked sick" + (d.sick.reported_later ? ", reported later" : "")) : null;
+  }
+
   function workoutCard(d) {
     const gaps = (d.not_fully_logged || []).map((g) => g.area);
     const ws = d.workouts || [];
     if (!ws.length) {
-      return card("Workout", null, h("p", { class: "muted small" }, gaps.includes("training") ? "You said a workout this day wasn't logged." : "No workout logged."));
+      return card("Workout", null, sickLine(d) || h("p", { class: "muted small" }, gaps.includes("training") ? "You said a workout this day wasn't logged." : "No workout logged."));
     }
-    return card("Workout", null, ws.map((w) => {
+    return card("Workout", null, sickLine(d), ws.map((w) => {
       // A time logged away from home carries its zone's name, such as "6:00 pm Pacific" (REQ-LOG-010)
       const at = w.started ? to12(w.started) : w.activity_time ? to12(w.activity_time) : null;
       const head = [w.label, at ? at + (w.zone_name ? " " + w.zone_name : "") : null,
@@ -188,17 +193,16 @@ const Pages = (() => {
   }
 
   // The day's weigh-ins as saved (REQ-BW-006): the day's weight with its time, then the later readings, each with its
-  // time and note; "No weigh-in" for a day without one, never zero; no change and no comment. And the day's sick mark
-  // (REQ-LOG-011). A database without body weight yet sends neither, and the card stays out.
+  // time and note; "No weigh-in" for a day without one, never zero; no change and no comment. (The day's sick mark is
+  // in the Workout card.) A database without body weight yet sends no weigh-ins, and the card stays out.
   function weightCard(d) {
     if (!("weigh_ins" in d)) return null;
     const list = d.weigh_ins || [];
-    const sick = d.sick ? h("p", { class: "small" }, h("i", { class: "sm" }), " Marked sick" + (d.sick.reported_later ? ", reported later" : "")) : null;
-    if (!list.length) return card("Weight", null, h("p", { class: "muted small" }, d.weigh_in_says || "No weigh-in"), sick);
+    if (!list.length) return card("Weight", null, h("p", { class: "muted small" }, d.weigh_in_says || "No weigh-in"));
     return card("Weight", list.length > 1 ? h("span", { class: "muted small" }, "The first weigh-in is the day's weight") : null,
       h("ul", { class: "plain weigh-ins" }, list.map((x) => h("li", {},
         h("b", {}, Views.reading(x)), h("span", { class: "muted" }, " · " + Views.readingTime(x)),
-        x.note ? h("div", { class: "small muted" }, x.note) : null))), sick);
+        x.note ? h("div", { class: "small muted" }, x.note) : null))));
   }
 
   // REQ-WEB-002 (Today) and REQ-WEB-007 (any past day, shown as Today showed it)

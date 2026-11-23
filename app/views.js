@@ -283,7 +283,9 @@ const Views = (() => {
   // Body weight (REQ-BW-008, REQ-RPT-008): each day's weight, each week's average and every reading. A day without a
   // weigh-in is a gap, never zero, and isn't missing data, so nothing here carries an asterisk (REQ-RPT-005 r3).
   const lb = (v) => (v === null || v === undefined ? "–" : String(Number(v)));
-  const reading = (x) => (x.approximate ? "about " : "") + lb(x.weight_lb) + " lb" + (x.kg ? " (" + lb(x.kg) + " kg)" : "");
+  // A weight as he said it ("184.0 lb"), from the database's weight_said (migration 069; CR1-D017)
+  const reading = (x) => (x.approximate ? "about " : "") + (x.weight_said || lb(x.weight_lb)) + " lb"
+    + (x.kg ? " (" + (x.said && / kg$/.test(x.said) ? x.said : lb(x.kg) + " kg") + ")" : "");
   const readingTime = (x) => (x.time_said || "no time") + (x.zone_name ? " " + x.zone_name : "") + (x.reported_later ? ", reported later" : "");
   function bodyWeight(body, r, o) {
     stopDraw();
@@ -298,20 +300,19 @@ const Views = (() => {
     const approxKey = h("div", { class: "key" }, h("span", {}, h("i", { class: "k-est" }), "approximate reading (\"about\")"));
     if (o.view === "graph") {
       const a = chartBox("Weight (lb)", "Each day's first weigh-in; a day without one is a gap");
-      const b = chartBox("Average weight each week (lb)", "Monday to Sunday, over the days weighed");
-      const c = chartBox("Calories, average per full day, each week", "Beside the weekly average weight");
-      body.append(a.node, b.node, c.node, approxKey);
+      // Weight against calories on one graph (REQ-RPT-008 example 1; CR1-D019)
+      const b = chartBox("Average weight and calories each week", "Line: average weight (lb, left), over the days weighed. Bars: calories per full day (right). Monday to Sunday");
+      body.append(a.node, b.node, approxKey);
       draw(() => {
         Charts.line(a.plot, { aria: "Weight by day", points: all.map((s) => {
           const d = byDay.get(s);
           return { label: long(s), short: short(s), value: d ? d.weight_lb : null, estimate: !!(d && d.approximate),
             tip: long(s) + "\n" + (d ? (d.approximate ? "about " : "") + lb(d.weight_lb) + " lb" + (d.readings > 1 ? "\n" + d.readings + " weigh-ins that day; the first counts" : "") : "No weigh-in") };
         }) });
-        Charts.line(b.plot, { aria: "Average weight by week", points: weeks.map((w) => ({ label: wk(w), short: short(w.week_start), value: w.average_lb,
-          tip: wk(w) + "\n" + (w.average_lb !== null && w.average_lb !== undefined ? lb(w.average_lb) + " lb, " + based(w.days) : "No weigh-ins") })) });
-        Charts.columns(c.plot, { aria: "Calories per full day by week", points: weeks.map((w) => ({ label: wk(w), short: short(w.week_start),
-          value: w.calorie_days ? w.calories_average : null, missing: !w.calorie_days,
-          tip: wk(w) + "\n" + (w.calorie_days ? fmt(w.calories_average) + " kcal per full day, " + based(w.calorie_days) : "No full days") })) });
+        Charts.pair(b.plot, { aria: "Average weight and calories per full day by week", points: weeks.map((w) => ({ label: wk(w), short: short(w.week_start),
+          value: w.average_lb, bar: w.calorie_days ? w.calories_average : null, barMissing: !w.calorie_days,
+          tip: wk(w) + "\n" + (w.average_lb !== null && w.average_lb !== undefined ? lb(w.average_lb) + " lb, " + based(w.days) : "No weigh-ins")
+               + "\n" + (w.calorie_days ? fmt(w.calories_average) + " kcal per full day, " + based(w.calorie_days) : "No full days") })) });
       });
     } else {
       body.append(table(["Day", "Time", "Weight", "Note"], (r.readings || []).map((x) => ({ cells: [long(x.date), readingTime(x), reading(x), x.note || ""] })), { num: [2] }));
