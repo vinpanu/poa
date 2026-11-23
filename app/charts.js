@@ -110,7 +110,9 @@ const Charts = (() => {
     const pad = { l: 44, r: 44, t: 16, b: 28 };
     const innerW = width - pad.l - pad.r;
     const innerH = height - pad.t - pad.b;
-    const vals = points.filter((p) => p.value !== null && p.value !== undefined).map((p) => p.value);
+    const has = (v) => v !== null && v !== undefined;
+    const vals = points.filter((p) => has(p.value)).map((p) => p.value)
+      .concat(points.filter((p) => has(p.low) && has(p.high)).flatMap((p) => [p.low, p.high]));
     if (!vals.length) return;
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const spread = hi - lo || Math.max(1, hi * 0.1);
@@ -122,12 +124,20 @@ const Charts = (() => {
     yAxis(svg, tv, y, pad.l, width - pad.r);
     const slot = innerW / Math.max(points.length, 1);
     const xc = (i) => pad.l + slot * i + slot / 2;
+    // a band (the forecast's path, low to high), behind the line: shaded, with a dashed middle; never joined to the line
+    const banded = points.map((p, i) => ({ p, i })).filter(({ p }) => has(p.low) && has(p.high));
+    if (banded.length) {
+      const top = banded.map(({ p, i }) => xc(i) + "," + y(p.high));
+      const bottom = banded.slice().reverse().map(({ p, i }) => xc(i) + "," + y(p.low));
+      el("path", { class: "band", d: "M" + top.join(" L") + " L" + bottom.join(" L") + " Z" }, svg);
+      el("path", { class: "band-mid", d: "M" + banded.map(({ p, i }) => xc(i) + "," + y((p.low + p.high) / 2)).join(" L") }, svg);
+    }
     let d = "";
     points.forEach((p, i) => {
       if (p.value === null || p.value === undefined) return;
       d += (d ? " L" : "M") + xc(i) + "," + y(p.value);
     });
-    el("path", { class: "line", d }, svg);
+    if (d) el("path", { class: "line", d }, svg);
     points.forEach((p, i) => {
       el("rect", { class: "hit", x: pad.l + slot * i, y: pad.t, width: slot, height: innerH, "data-tip": p.tip || "" }, svg);
       if (p.value === null || p.value === undefined) {
@@ -137,8 +147,7 @@ const Charts = (() => {
       el("circle", { class: "dot" + (p.estimate ? " est" : ""), cx: xc(i), cy: y(p.value), r: 4 }, svg);
     });
     const last = [...points].reverse().find((p) => p.value !== null && p.value !== undefined);
-    const li = points.lastIndexOf(last);
-    el("text", { class: "lbl", x: xc(li) + 8, y: y(last.value) + 4 }, svg, fmt(last.value));
+    if (last) el("text", { class: "lbl", x: xc(points.lastIndexOf(last)) + 8, y: y(last.value) + 4 }, svg, fmt(last.value));
     el("line", { x1: pad.l, x2: width - pad.r, y1: yBase, y2: yBase }, el("g", { class: "axis" }, svg));
     xLabels(svg, points, xc, yBase, slot);
   }

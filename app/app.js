@@ -326,10 +326,31 @@ const tiles = (list) => h("div", { class: "tiles" }, list.map((p) => h("a", { cl
 const openFood = (entryId) => Pages.foodSheet(entryId, call);
 
 // Home (REQ-WEB-001): Today, then This week, then Reports and History. No Plan section until the coach makes plans.
+// Once there is a plan, the coach's plan picture comes first, where REQ-WEB-023 and REQ-WEB-003 revision 2 put it:
+// after Today's plan (which comes with the coach's plans) and before Today; without a plan there is no picture.
+async function planCard(box) {
+  const r = await call("plan", {});
+  if (!r || r.status !== "ok") return;
+  const inner = h("div", {});
+  const checks = h("div", { class: "checks" });
+  checks.hidden = true;
+  const btn = h("button", { type: "button", class: "link", "aria-expanded": "false" }, "Progress checks");
+  btn.addEventListener("click", async () => {
+    checks.hidden = !checks.hidden;
+    btn.setAttribute("aria-expanded", String(!checks.hidden));
+    if (checks.hidden || checks.childElementCount) return;
+    const rs = await Promise.all(["day", "week", "month"].map((kind) => call("progress_check", { kind })));
+    for (const c of rs) Views.show.progress_check(checks, c, {});
+  });
+  box.append(h("section", { class: "card plan-card" }, h("div", { class: "card-h" }, h("h2", {}, "Your plan")), inner, btn, checks));
+  Views.show.plan(inner, r, view());
+}
+
 async function homePage(body) {
+  const planBox = h("div", {});
   const todayBox = h("div", {});
   const weekBox = h("div", {});
-  body.append(todayBox, weekBox, h("div", { class: "tiles" },
+  body.append(planBox, todayBox, weekBox, h("div", { class: "tiles" },
     h("a", { class: "tile", href: "#/reports" }, h("strong", {}, "Reports"), h("span", {}, "Nutrition, then exercise, for any period")),
     h("a", { class: "tile", href: "#/history" }, h("strong", {}, "History"), h("span", {}, "Any past day, as Today shows it"))));
   const secured = h("p", { class: "muted small" });
@@ -339,7 +360,7 @@ async function homePage(body) {
     secured.append(on ? "Second sign-in step: on. " : "Second sign-in step: not set up yet. ",
       h("a", { href: "#/security" }, on ? "Details" : "Set it up"));
   });
-  const [d, w] = await Promise.all([call("day", {}), call("week", {})]);
+  const [d, w] = await Promise.all([call("day", {}), call("week", {}), planCard(planBox).catch(() => null)]);
   Pages.dayView(todayBox, d, { live: true, openFood });
   Pages.weekView(weekBox, w);
 }

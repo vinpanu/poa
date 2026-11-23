@@ -502,6 +502,141 @@ const Views = (() => {
     body.append(notes(LOAD_NOTE[r.load_meaning], r.note));
   }
 
+
+  // ---------------------------------------------------------------- the coach's plan (REQ-OBJ-006, REQ-WEB-023)
+  // Drawn from plan (migration 052): what the database returns and nothing else, so no picture without a plan, a
+  // planned mesocycle is an outline, and how sure the coach is shows as the number only (REQ-OBJ-004).
+  const sure = (f) => (!f ? "no forecast yet" : f.state === "scored" ? f.score + " out of 100" : f.says);
+  const objWords = { build: "build", cut: "cut", maintain: "maintenance phase" };
+  const span = (a, b) => short(a) + " – " + short(b);
+  const goalLines = (goals) => (goals || []).map((g) => h("p", { class: "small" }, g.goal_said + (g.is_limit ? " (a limit)" : "")
+    + (g.progress && g.progress.calculated && g.progress.says ? ": " + g.progress.says : "")
+    + (g.forecast ? " How sure the coach is: " + sure(g.forecast) + "." : "")));
+  // The week a path entry is for: its week_start, or else its week number counted from the forecast's week
+  const mondayOf = (s) => { const d = parse(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return ymd(d); };
+  function pathWeeks(path) {
+    if (!path || !Array.isArray(path.path)) return [];
+    const base = path.as_of ? mondayOf(String(path.as_of).slice(0, 10)) : null;
+    return path.path.map((x) => ({ week_start: x.week_start || (base && x.week ? addDays(base, 7 * (x.week - 1)) : null), low: x.low, high: x.high }))
+      .filter((x) => x.week_start && typeof x.low === "number" && typeof x.high === "number");
+  }
+
+  function planBar(r) {
+    const segs = (r.mesocycles || []).map((m) => ({ kind: m.status === "done" ? "done" : m.status === "upcoming" ? "upcoming" : "current", weeks: m.weeks || m.length_weeks, m }))
+      .concat((r.outline || []).map((b) => ({ kind: "planned", weeks: b.length_weeks, b })));
+    const cur = (r.mesocycles || []).find((m) => m.status === "current");
+    const bar = h("div", { class: "plan-bar", role: "img", "aria-label": "Mesocycles: "
+      + segs.map((s) => s.kind === "planned" ? "planned" : s.kind + (s.m.number ? " mesocycle " + s.m.number : "")).join(", ") });
+    for (const s of segs) {
+      const box = h("span", { class: "m-" + s.kind, style: "flex-grow:" + s.weeks,
+        title: s.m ? (s.m.number ? "Mesocycle " + s.m.number + ": " : "") + objWords[s.m.objective] + ", " + span(s.m.start_date, s.m.end_date)
+                   : "Planned: " + objWords[s.b.objective] + ", " + s.b.length_weeks + " weeks" },
+        s.kind === "current" && s.m.weeks_on_day ? "Week " + s.m.weeks_on_day.week_number + " of " + s.m.weeks_on_day.total : String(s.weeks) + " wk");
+      if (s.kind === "current" && s.m.weeks_on_day) {
+        const days = (parse(r.date) - parse(s.m.start_date)) / 86400000 + 0.5;
+        box.append(h("i", { class: "now", style: "left:" + Math.min(100, Math.max(0, (100 * days) / (7 * s.weeks))).toFixed(1) + "%", "aria-hidden": "true" }));
+      }
+      bar.append(box);
+    }
+    const done = segs.filter((s) => s.kind === "done").length, planned = segs.filter((s) => s.kind === "planned" || s.kind === "upcoming").length;
+    const caption = [done ? done + " done" : null,
+      cur ? "now " + (cur.number ? "mesocycle " + cur.number + ", " : "") + objWords[cur.objective] + ", week " + cur.weeks_on_day.week_number + " of " + cur.weeks_on_day.total : "none current",
+      planned ? planned + " planned" : null].filter(Boolean).join(" · ");
+    return [bar, h("p", { class: "small muted" }, caption)];
+  }
+
+  function planList(r) {
+    const items = (r.mesocycles || []).map((m) => {
+      const head = (m.number ? "Mesocycle " + m.number + ": " : "") + cap(objWords[m.objective]) + ", " + m.weeks + " weeks, " + span(m.start_date, m.end_date);
+      const kids = [h("p", {}, h("strong", {}, head))];
+      if (m.status === "done") {
+        kids.push(...goalLines((m.goals || []).map((g) => ({ ...g, progress: null, forecast: null }))));
+        kids.push(m.review ? h("p", { class: "small" }, "Result: " + m.review.result + ". Ratings: the coach's " + m.review.coach_rating
+          + ", yours " + (m.review.vince_rating || "not given")) : h("p", { class: "small muted" }, "Not reviewed yet"));
+      } else if (m.status === "current") {
+        kids.push(h("p", { class: "small" }, m.weeks_on_day.says + "."), ...goalLines(m.goals));
+      } else kids.push(h("p", { class: "small" }, "Starts " + long(m.start_date) + "."), ...goalLines((m.goals || []).map((g) => ({ ...g, progress: null }))));
+      return h("li", {}, kids);
+    }).concat((r.outline || []).map((b) => h("li", {}, h("p", {}, h("strong", {}, "Planned: " + cap(objWords[b.objective]) + ", " + b.length_weeks + " weeks")),
+      h("p", { class: "small" }, b.goal_summary + ". An outline, agreed when it comes up."))));
+    return h("ul", { class: "plan-list" }, items);
+  }
+
+  function weightLine(r, o) {
+    const wl = r.weight_line;
+    if (!wl) return notes(r.weight_line_says || "No weigh-ins yet.");
+    const weeks = wl.weeks || [];
+    const path = pathWeeks(wl.path);
+    const starts = [...new Set(weeks.map((w) => w.week_start).concat(path.map((x) => x.week_start)))].sort();
+    const byW = new Map(weeks.map((w) => [w.week_start, w]));
+    const byP = new Map(path.map((x) => [x.week_start, x]));
+    const pts = starts.map((s) => {
+      const w = byW.get(s), p = byP.get(s);
+      return { label: "Week of " + short(s), short: short(s), value: w ? w.average_lb : null, low: p ? p.low : null, high: p ? p.high : null,
+        tip: "Week of " + short(s) + "\n" + (w ? lb(w.average_lb) + " lb average, " + w.days + " day" + (w.days === 1 ? "" : "s") + " weighed" : "No weigh-ins")
+             + (p ? "\nPlan's path: " + lb(p.low) + " to " + lb(p.high) + " lb" : "") };
+    });
+    const box = h("div", {});
+    if (o.view === "graph") {
+      const c = chartBox("Weight against the plan's path (lb)", "Your weekly average weight; the shaded band is the coach's latest forecast path");
+      box.append(c.node);
+      draw(() => Charts.line(c.plot, { aria: "Weekly average weight against the plan's path", points: pts }));
+    } else {
+      box.append(table(["Week", "Average weight", "Plan's path"], pts.map((p) => ({ cells: [p.label,
+        p.value !== null ? lb(p.value) + " lb" : "No weigh-ins", p.low !== null ? lb(p.low) + " to " + lb(p.high) + " lb" : "–"] })), { num: [1, 2] }));
+    }
+    box.append(notes(!weeks.length ? "No weigh-ins yet: only the plan's path is shown." : null,
+      !path.length ? "No forecast path yet: only your weekly averages are shown." : null));
+    return box;
+  }
+
+  function planView(body, r, o) {
+    stopDraw();
+    if (!r || r.status !== "ok") { body.append(notes((r && r.says) || "No plan yet.")); return; }
+    const g = r.long_term_goal;
+    if (g) body.append(h("div", { class: "plan-goal" }, h("p", {}, h("strong", {}, "Long-term goal: "), g.goal_said),
+      g.progress && g.progress.says ? h("p", { class: "small" }, g.progress.says) : null,
+      h("p", { class: "small" }, "How sure the coach is: " + sure(g.forecast))));
+    body.append(...planBar(r));
+    const list = planList(r);
+    list.hidden = !o.list;
+    const btn = h("button", { type: "button", class: "link", "aria-expanded": String(!!o.list) }, o.list ? "Hide the list" : "List each mesocycle");
+    btn.addEventListener("click", () => { list.hidden = !list.hidden; btn.textContent = list.hidden ? "List each mesocycle" : "Hide the list";
+      btn.setAttribute("aria-expanded", String(!list.hidden)); });
+    body.append(btn, list, weightLine(r, o));
+  }
+
+  // One progress check (REQ-OBJ-004), from progress_check: each part's value or what it waits for, and the coach's note
+  const CHECK_TITLES = { day: "Today", week: "This week", month: "The last four weeks", mesocycle: "This mesocycle" };
+  function progressCheck(body, r) {
+    stopDraw();
+    if (!r || r.status !== "ok") { body.append(notes((r && r.says) || "No check yet.")); return; }
+    const p = r.parts || {};
+    const line = (label, text) => h("p", { class: "small" }, h("strong", {}, label + ": "), text);
+    const kids = [];
+    if (r.kind === "day") {
+      kids.push(line("Meals", p.meals.says), line("Weight", p.weight ? p.weight.says : p.weight_says),
+        line("Sets", p.sets.says + " (planned: " + p.sets.planned_says.toLowerCase() + ")"), line("Photo", p.photo_says.toLowerCase()));
+      kids.push(...goalLines(p.goals));
+    } else if (r.kind === "week") {
+      const w = p.weight.this_week;
+      kids.push(line("Average weight", w.average_lb !== null && w.average_lb !== undefined ? w.says + (p.weight.change_says ? ", " + p.weight.change_says.toLowerCase() + " on the week before" : "") : w.says),
+        line("Days weighed in", String(p.days_weighed_in.count)), line("Workouts", String(p.workouts.count)),
+        line("Calories and protein", p.averages.days_counted ? fmt(p.averages.calories) + " kcal and " + fmt(p.averages.protein_g) + " g protein a day, over "
+          + p.averages.days_counted + " full day" + (p.averages.days_counted === 1 ? "" : "s") : "No full days yet"),
+        line("Sets on target", p.sets_on_target_says.toLowerCase()));
+    } else if (r.kind === "month") {
+      kids.push(line("Four-week change", p.weight_change.change_says || "Not enough weigh-ins"),
+        line("Long-term goal", p.long_term_goal && p.long_term_goal.progress ? p.long_term_goal.progress.says : "No long-term goal"),
+        line("Workouts", String(p.workouts.count)), line("Days of cardio", p.cardio_says.toLowerCase()));
+    } else {
+      kids.push(line("Weeks", p.weeks.says), ...goalLines(p.goals), line("Next", p.next.says));
+    }
+    kids.push(r.note ? line("The coach's note, " + short(r.note.noted_on), r.note.on_track.replace("_", " ") + ". " + r.note.note)
+      : h("p", { class: "small muted" }, "No note from the coach for this period yet."));
+    body.append(h("section", {}, h("h3", {}, CHECK_TITLES[r.kind] || "Check"), kids));
+  }
+
   // Keyed by the connector's report action names
   const show = {
     nutrition_report: nutrition,
@@ -516,6 +651,8 @@ const Views = (() => {
     records_report: recordsList,
     muscle_group_sets: muscleGroupSets,
     exercise_page: exercisePage,
+    plan: planView,
+    progress_check: progressCheck,
   };
   const titles = {
     nutrition_report: "Nutrition",
@@ -530,6 +667,8 @@ const Views = (() => {
     records_report: "Personal records",
     muscle_group_sets: "Working sets by muscle group",
     exercise_page: "Exercise",
+    plan: "Your plan",
+    progress_check: "Progress check",
   };
 
   return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles, reading, readingTime, lb, setItem, setList, dayComma, exHref,
