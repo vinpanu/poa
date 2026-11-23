@@ -159,7 +159,9 @@ const Pages = (() => {
       return card("Workout", null, h("p", { class: "muted small" }, gaps.includes("training") ? "You said a workout this day wasn't logged." : "No workout logged."));
     }
     return card("Workout", null, ws.map((w) => {
-      const head = [w.label, w.started ? to12(w.started) : w.activity_time ? to12(w.activity_time) : null,
+      // A time logged away from home carries its zone's name, such as "6:00 pm Pacific" (REQ-LOG-010)
+      const at = w.started ? to12(w.started) : w.activity_time ? to12(w.activity_time) : null;
+      const head = [w.label, at ? at + (w.zone_name ? " " + w.zone_name : "") : null,
         w.length_min ? w.length_min + " min" : null, plural(w.working_sets, "working set")].filter(Boolean).join(" · ");
       // Only a timed workout can be open, waiting for "end workout" or the coach's closing question (REQ-WKT-006, 008);
       // one logged afterwards has no clock, so it is marked as reported later instead (REQ-LOG-006; CR1-D012, POABUILD-69)
