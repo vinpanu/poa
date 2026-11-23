@@ -145,19 +145,18 @@
   const MISSION_COLOR = { '0': '--steel', '1': '--purple', '2': '--green', '3': '--sky', '4': '--orange', all: '--amber' };
   const MISSION_NAME = { '0': 'Planning and governance', '1': 'Coaching foundations', '2': 'Athlete model', '3': 'Data capture', '4': 'Daily running', all: 'Whole program' };
   const mColor = m => css(MISSION_COLOR[m] || '--teal');
-  // A lane's chip says whether its stages are on schedule (Vince, 2026-11-02); what waits on Vince shows
-  // beside it. A lane the schedule doesn't cover shows no schedule status.
+  // A lane's chip says whether its stages are on schedule (Vince, 2026-11-02). A lane the schedule doesn't
+  // cover shows no schedule status. What waits on Vince is only on his pending actions list (Vince,
+  // 2026-11-23), so the lanes' own waiting fields are no longer shown.
   const workstreams = () => (S.feed.workstreams || []).map(w => {
     const updated = parseDate(w.updated);
     const closed = /closed|complete/i.test(w.status || '');
-    const stalledDays = daysSince(updated);
     const sched = closed ? null : laneState(w.id);
     const status = closed ? 'done' : sched ? sched.s : 'none';
-    return { ...w, name: w.name || w.id, updatedDate: updated, closed, status, sched, blocked: !closed && stalledDays >= 3 ? stalledDays : 0 };
+    return { ...w, name: w.name || w.id, updatedDate: updated, closed, status, sched };
   });
   const STATUS_LABEL = { done: 'Done', moved: 'Moved', track: 'On track', risk: 'At risk', behind: 'Behind', none: 'No schedule' };
   const chip = st => `<span class="chip ${st}">${STATUS_LABEL[st]}</span>`;
-  const needsChip = w => w.waiting && !w.closed ? '<span class="chip needs">Needs you</span>' : '';
   const slug = id => 'ws-' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const content = page => (S.feed.content && S.feed.content[page]) || [];
   const section = (page, title) => content(page).find(s => s.title.toLowerCase() === title.toLowerCase()) || { title: '', paras: [], items: [] };
@@ -809,25 +808,10 @@
   // ---------- shared blocks ----------
   const head = (crumb, title, lead) => `<div class="page-head rise"><div class="crumb">${crumb}</div><h1>${esc(title)}</h1>${lead ? `<p class="lead">${esc(lead)}</p>` : ''}</div>`;
   const paras = list => (list || []).map(p => `<p>${esc(p)}</p>`).join('');
-  // What exactly is asked, from the lane's open sponsor request: numbered or bulleted lines become a list.
-  function waitingDetail(text) {
-    const lines = String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
-    if (!lines.length) return '';
-    let html = '', list = [], tag = 'ol';
-    const flush = () => { if (list.length) html += `<${tag}>${list.map(t => `<li>${esc(t)}</li>`).join('')}</${tag}>`; list = []; };
-    lines.forEach(l => {
-      const m = l.match(/^(\d+[.)]|[-•*])\s+(.+)$/);
-      if (!m) { flush(); html += `<p>${esc(l)}</p>`; return; }
-      if (!list.length) tag = /\d/.test(m[1]) ? 'ol' : 'ul';
-      list.push(m[2]);
-    });
-    flush();
-    return `<div class="need-detail">${html}</div>`;
-  }
   function wsCard(w, i) {
     const p = w.progress;
     const bar = p && p.total ? `<div class="bar"><i style="width:${(p.complete / p.total * 100).toFixed(1)}%;background:${pColor(w)}"></i><i style="width:${((p.partial || 0) / p.total * 100).toFixed(1)}%;background:${pColor(w)}55"></i></div>` : '';
-    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}${needsChip(w)}<b>${esc(w.name)}</b>
+    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}<b>${esc(w.name)}</b>
       <div class="now">${w.now ? 'Now: ' + esc(w.now) : ''}${w.next && !w.closed ? '<br>Next: ' + esc(w.next) : ''}</div>${bar}</a>`;
   }
   // When the summary was last checked, the site's copy of the whole document, and the original.
@@ -922,8 +906,8 @@
   }
   // Done, now and next (Vince, 2026-11-13: "a concise visual to see what's been completed recently, what's
   // up now and what is coming in the near future", at any time). Done: the lanes' recently done lines from
-  // the last two weeks. Now: what waits on Vince, then each area's stages under way or due to have started,
-  // worst first. Coming up: each area's next stage starting in the next four weeks, then the launch window.
+  // the last two weeks. Now: each area's stages under way or due to have started, worst first (what waits
+  // on Vince is his pending actions list, above). Coming up: each area's next stage starting in the next four weeks, then the launch window.
   // All read from the Registry and Jira like the rest of the page, so it stays current by itself.
   const GLANCE_BACK = 14, GLANCE_AHEAD = 28;
   const lowerFirst = s => /^.[a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
@@ -935,13 +919,11 @@
       .filter(d => d.dateD && daysSince(d.dateD) <= GLANCE_BACK).sort((a, b) => b.dateD - a.dateD).slice(0, 8)
       .map(d => li(fmt(d.dateD), esc(d.text)));
     const started = r => !r.done && !r.milestone && (/in progress/i.test(r.status) || (r.startD && r.startD < today));
-    const you = ws.filter(w => w.waiting && !w.closed)
-      .map(w => li('You', `<a href="#${slug(w.id)}">${esc(w.waiting)}</a>${w.waitingWhen ? ` <span class="sub">· ${esc(w.waitingWhen)}</span>` : ''}`));
     const under = areas().map(a => ({ a, rows: a.rows.filter(started) })).filter(x => x.rows.length).map(x => {
       const st = rowsState(x.rows).s, due = x.rows.map(r => r.finishD).filter(Boolean).sort((p, q) => p - q)[0];
       return { st, due, html: `<b>${esc(x.a.name)}</b>: ${esc(x.rows.map(r => lowerFirst(shortItem(r.item, x.a.name))).join(', '))}${st === 'risk' || st === 'behind' ? ' ' + chip(st) : ''}` };
     }).sort((p, q) => SEVERITY[q.st] - SEVERITY[p.st] || (p.due || 0) - (q.due || 0));
-    const now = you.concat(under.slice(0, 8).map(u => li(u.due ? 'Due ' + fmt(u.due) : '', u.html)));
+    const now = under.slice(0, 8).map(u => li(u.due ? 'Due ' + fmt(u.due) : '', u.html));
     const more = under.length > 8 ? `<p class="sub">And ${under.length - 8} more on the <a href="#roadmap">schedule</a></p>` : '';
     const next = areas().map(a => a.rows.filter(r => !r.done && !started(r) && r.startD && r.startD >= today && r.startD <= until).sort((p, q) => p.startD - q.startD)[0])
       .filter(Boolean).sort((p, q) => p.startD - q.startD).slice(0, 6).map(r => li(fmt(r.startD), esc(r.item)));
@@ -961,9 +943,8 @@
     const p = w.progress;
     return `<div class="wrap">
       <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="crumb"><a href="#workstreams">Status &rsaquo; Workstreams</a> &rsaquo;</div><h1>${esc(w.name)}</h1>
-        <div>${chip(w.status)}${needsChip(w)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
+        <div>${chip(w.status)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
       ${w.sched && w.sched.why.length ? `<div class="card rise"><h3>${esc(STATUS_LABEL[w.status])}</h3><ul class="why">${w.sched.why.map(t => `<li>${esc(t)}</li>`).join('')}</ul><div class="sub" style="margin-top:8px"><a href="#roadmap">Schedule and milestones &rsaquo;</a></div></div>` : ''}
-      ${w.waiting && !w.closed ? `<div class="callout rise"><b>${esc(w.waiting)}</b><span class="sub">${esc(w.waitingWhen)}${w.blocked ? ' · blocked ' + w.blocked + ' days' : ''}</span>${waitingDetail(w.waitingDetail)}</div>` : ''}
       <div class="grid g-half">
         ${p && p.total ? `<div class="card rise"><h3>Progress</h3><div class="sub">${esc(p.measure)}</div><div class="chart" id="wsRing" style="height:230px"></div>
           <div class="sub">Checked ${esc(fmtLong(parseDate(p.checked)))}. Counts definition work, not testing or building.</div>${p.stale ? '<p class="warn">These counts are waiting for the automatic Jira refresh.</p>' : ''}</div>` : ''}
