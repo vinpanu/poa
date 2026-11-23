@@ -317,6 +317,19 @@ async function exercisePage(body, id, rerender) {
     h("div", { class: "controls" }, ...periodControls(() => { exShown.limit = 5; rerender(); }, "ex", shown), viewSwitch(rerender)));
   Views.show.exercise_page(body, r, { ...view(), more: () => { exShown.limit += 5; rerender(); } });
 }
+// Supplements and water come after nutrition and exercise (REQ-SUP-010, REQ-SUP-012, REQ-WEB-013): any period, as a
+// graph or text; supplements listed by supplement or grouped by stack
+async function supplementsSection(body, rerender) {
+  const by = pref("supby", "supplement");
+  body.append(h("div", { class: "controls" }, ...periodControls(rerender), viewSwitch(rerender),
+    seg([["supplement", "By supplement"], ["stack", "By stack"]], by, (v) => { setPref("supby", v); rerender(); }, "List by supplement or by stack")));
+  const { from, to } = period();
+  const [s, w] = await Promise.all([call("supplement_report", { from, to, group_by: by }), call("water_report", { from, to })]);
+  const box = (title, sub) => { const x = h("section", { class: "card report" }, h("h2", {}, title), sub ? h("p", { class: "muted small" }, sub) : null); body.append(x); return x; };
+  Views.show.supplement_report(box("Supplements", "Each one's days taken out of the days in the period, its amount a day when taken and its total"), s, view());
+  Views.show.water_report(box("Water", "Water per day; a day without water is a gap, never zero"), w, view());
+}
+
 // Body weight comes after nutrition and exercise (REQ-WEB-013, REQ-BW-008)
 const BODY_REPORTS = [
   { path: "weight", title: "Body weight", blurb: "Your weight by day and week, every weigh-in, and weight beside calories", render: weightPage },
@@ -369,7 +382,11 @@ async function historyPage(body, date) {
 // Reports (REQ-WEB-013): nutrition first, then exercise, then body weight. Nutrition opens on the period's summary (task P4).
 let reportSection = "nut";
 async function reportsPage(body, rerender) {
-  body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"], ["bw", "Body weight"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition, exercise or body weight")));
+  body.append(h("div", { class: "seg-wide" }, seg([["nut", "Nutrition"], ["ex", "Exercise"], ["bw", "Body weight"], ["sw", "Supplements, water"]], reportSection, (v) => { reportSection = v; rerender(); }, "Nutrition, exercise, body weight, or supplements and water")));
+  if (reportSection === "sw") {
+    await supplementsSection(body, rerender);
+    return;
+  }
   if (reportSection === "ex") {
     await exerciseSection(body, rerender);
     return;

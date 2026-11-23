@@ -503,6 +503,55 @@ const Views = (() => {
     body.append(notes(LOAD_NOTE[r.load_meaning], r.note));
   }
 
+  // Supplements over any period (REQ-SUP-008, REQ-SUP-010): by supplement, its days taken out of the period's days, the
+  // days skipped, its amount a day when taken and its total, with a column for each day taken and a gap for each day
+  // without (never zero); by stack, each stack with the amount taken through it, and "Taken on its own"
+  const periodDays = (from, to) => { const out = []; for (let d = from; d <= to; d = addDays(d, 1)) out.push(d); return out; };
+  function supplementReport(body, r, o) {
+    const sups = r.supplements || [];
+    if (!sups.length) { body.append(h("p", { class: "muted" }, "No supplements logged in this period.")); return; }
+    if (r.group_by === "stack") {
+      for (const st of r.stacks || []) {
+        body.append(h("section", { class: "card report" }, h("h2", {}, cap(st.stack)),
+          table(["Supplement", "Through it", "Days"], (st.supplements || []).map((x) => ({ cells: [cap(x.supplement),
+            (x.at_least ? "≥ " : "") + (x.total !== null && x.total !== undefined ? fmt(x.total) + " " + (x.unit || "") : "no amount given"), String(x.days_taken)] })), { num: [2] })));
+      }
+    } else if (o.view === "graph") {
+      const days = periodDays(r.from, r.to);
+      for (const s of sups) {
+        if (!s.days_taken) { body.append(h("p", { class: "small" }, cap(s.says))); continue; }
+        const box = chartBox(cap(s.supplement), s.says.replace(/^[^:]*: /, ""));
+        body.append(box.node);
+        const byDay = Object.fromEntries((s.days || []).map((x) => [x.date, x]));
+        draw(() => Charts.columns(box.plot, { aria: s.supplement + " per day", points: days.map((d) => ({ label: long(d), short: short(d),
+          value: byDay[d] ? byDay[d].amount : null,
+          tip: long(d) + "\n" + (byDay[d] ? (byDay[d].at_least ? "at least " : "") + fmt(byDay[d].amount) + " " + (s.unit || "") : "not logged") })) }));
+      }
+    } else {
+      body.append(table(["Supplement", "Days taken", "A day when taken", "Total"], sups.map((s) => ({ cells: [cap(s.supplement),
+        s.days_taken + " of " + r.days_in_period + (s.days_skipped ? ", skipped " + s.days_skipped : ""),
+        s.days_taken ? (s.at_least ? "≥ " : "") + fmt(s.per_day_when_taken) + " " + (s.unit || "") : "–",
+        s.days_taken ? (s.at_least ? "≥ " : "") + fmt(s.total) + " " + (s.unit || "") : "–"] })), { num: [1, 2, 3] }));
+    }
+    body.append(notes(r.note));
+  }
+
+  // Water over any period (REQ-SUP-012): ounces per day as bars, a gap for a day without water (never zero), and the
+  // average over the days with water, saying how many, with no asterisk
+  function waterReport(body, r, o) {
+    const days = r.days || [];
+    body.append(h("p", { class: "small" }, r.says || ""));
+    if (o.view === "graph" && r.days_with_water) {
+      const box = chartBox("Water per day", "Ounces");
+      body.append(box.node);
+      draw(() => Charts.columns(box.plot, { aria: "Water per day", points: days.map((x) => ({ label: long(x.date), short: short(x.date),
+        value: x.oz, tip: long(x.date) + "\n" + x.says })) }));
+    } else {
+      body.append(table(["Day", "Water"], days.slice().reverse().map((x) => ({ cells: [long(x.date), x.says + (x.waiting ? " (" + x.waiting + " waiting)" : "")] }))));
+    }
+    body.append(notes(r.note));
+  }
+
   // Keyed by the connector's report action names
   const show = {
     nutrition_report: nutrition,
@@ -517,6 +566,8 @@ const Views = (() => {
     records_report: recordsList,
     muscle_group_sets: muscleGroupSets,
     exercise_page: exercisePage,
+    supplement_report: supplementReport,
+    water_report: waterReport,
   };
   const titles = {
     nutrition_report: "Nutrition",
@@ -531,6 +582,8 @@ const Views = (() => {
     records_report: "Personal records",
     muscle_group_sets: "Working sets by muscle group",
     exercise_page: "Exercise",
+    supplement_report: "Supplements",
+    water_report: "Water",
   };
 
   return { fmt, h, seg, field, table, notes, draw, stopDraw, setNames, show, titles, reading, readingTime, lb, setItem, setList, dayComma, exHref,

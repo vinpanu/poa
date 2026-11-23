@@ -114,12 +114,26 @@ const Pages = (() => {
       live ? h("p", { class: "muted small" }, dayLong(d.date)) : null,
       h("div", { class: "kcal-row" }, h("span", { class: "big" }, (t.at_least ? "≥ " : "") + kcal(t.calories)), h("span", { class: "unit" }, "kcal" + (live ? " so far" : ""))),
       macroBar(t.protein_g, t.carbohydrate_g, t.fat_g),
+      t.supplements && t.supplements.calories ? h("p", { class: "tiny muted" }, "Includes " + kcal(t.supplements.calories) + " kcal from supplements.") : null,
       t.at_least ? h("p", { class: "tiny muted" }, "At least: some foods are pending or have no value.") : null);
+  }
+
+  function supplementsLine(d) {
+    const s = d.totals && d.totals.supplements;
+    if (!s || !s.calories) return null;
+    return h("details", { class: "row sup-line" }, h("summary", {},
+      h("span", { class: "s-main" }, h("span", { class: "s-title" }, "Supplements"), h("span", { class: "s-sub" }, "Those whose calories count")),
+      h("span", { class: "s-right" }, kcal(s.calories), h("span", { class: "tiny muted" }, " kcal"))),
+      h("div", { class: "inner" }, h("p", { class: "s-sub" }, "Protein " + grams(s.protein_g) + " g · Carbs " + grams(s.carbohydrate_g) + " g · Fat " + grams(s.fat_g) + " g"),
+        h("p", { class: "tiny muted" }, "A supplement taken with a meal counts here, not in the meal.")));
   }
 
   function mealsCard(d, openFood) {
     const meals = d.meals || [];
-    if (!meals.length) return null;
+    if (!meals.length) {
+      const sl = supplementsLine(d);
+      return sl ? card("Meals", null, h("p", { class: "muted small" }, "No food logged."), h("div", { class: "list" }, sl)) : null;
+    }
     const list = h("div", { class: "list" }, meals.map((m) => {
       const n = m.meal_number;
       const foods = (m.entries || []).map((e) => {
@@ -138,6 +152,8 @@ const Pages = (() => {
         h("div", { class: "foods" }, foods),
       ]);
     }));
+    const sl = supplementsLine(d);
+    if (sl) list.append(sl);
     return card("Meals", h("span", { class: "muted small" }, "Numbered in the order eaten"), list,
       h("p", { class: "tiny muted" }, "Tap a meal to see its foods, and a food to see every nutrient."));
   }
@@ -205,9 +221,58 @@ const Pages = (() => {
         x.note ? h("div", { class: "small muted" }, x.note) : null))));
   }
 
-  // REQ-WEB-002 (Today) and REQ-WEB-007 (any past day, shown as Today showed it)
+  // The day's supplements (REQ-SUP-008, REQ-SUP-010): each stack logged or said skipped, and supplements logged on
+  // their own, by occasion in the day's order, with their items, amounts and any difference from the stack; and the
+  // day's total of a supplement taken more than once. A stack he didn't report shows nothing. A database without
+  // supplements yet sends no supplements, and the card stays out; a day with none logged shows no card either.
+  const OCC = { on_waking: "On waking", with_meal: "With a meal", before_training: "Before training", after_training: "After training", before_bed: "Before bed" };
+  function supplementsCard(d) {
+    if (!d.supplements || !(d.supplements.intakes || []).length) return null;
+    const intakes = d.supplements.intakes;
+    const groups = [];
+    for (const x of intakes) {
+      const name = x.occasion ? OCC[x.occasion] : "No occasion given";
+      let g = groups.find((y) => y.name === name);
+      if (!g) { g = { name, list: [] }; groups.push(g); }
+      g.list.push(x);
+    }
+    const itemLine = (it) => h("li", { class: it.item_state === "taken" ? null : "muted" }, cap(it.says || it.supplement));
+    const intakeRow = (x) => row([
+      h("span", { class: "s-main" }, h("span", { class: "s-title" }, x.stack ? cap(x.stack) : "On its own"),
+        h("span", { class: "s-sub" }, [x.time_said || (x.time ? to12(x.time) : null),
+          x.occasion === "with_meal" ? (x.meal_number ? "with meal " + x.meal_number : "no meal attached") : null,
+          x.reported_later ? "reported later" : null].filter(Boolean).join(" · "))),
+      x.state === "skipped" ? pill("p-nd", "Skipped") : h("span", { class: "s-right" }, plural((x.items || []).filter((i) => i.item_state === "taken").length, "item")),
+    ], [x.state === "skipped" ? h("p", { class: "small muted" }, "You said you skipped it. Nothing counts.")
+      : h("ul", { class: "plain sup-items" }, (x.items || []).map(itemLine)),
+      x.adds && x.adds.calories ? h("p", { class: "tiny muted" }, "Adds " + kcal(x.adds.calories) + " kcal, in the day's totals.") : null]);
+    const totals = d.supplements.day_totals || [];
+    return card("Supplements", null,
+      groups.map((g) => h("div", { class: "sup-occ" }, h("h3", {}, g.name), h("div", { class: "list" }, g.list.map(intakeRow)))),
+      totals.length ? h("div", { class: "sup-totals" }, h("h3", {}, "Taken more than once"),
+        h("ul", { class: "plain" }, totals.map((s) => h("li", {}, cap(s.says))))) : null);
+  }
+
+  // The day's water (REQ-SUP-012): its total and each entry with its time; an entry waiting for its size is listed as
+  // waiting and adds nothing; a day without water says "No water logged", never zero. Its own line, apart from meals
+  // and supplements. A database without water yet sends none, and the card stays out.
+  function waterCard(d) {
+    if (!d.water) return null;
+    const ws = d.water.entries || [];
+    if (!ws.length) return card("Water", null, h("p", { class: "muted small" }, d.water.says || "No water logged"));
+    const total = d.water.total_oz;
+    return card("Water", h("span", { class: "muted small" }, (total !== null && total !== undefined ? total + " oz" : "No size yet")
+        + (d.water.waiting ? " · " + d.water.waiting + " waiting" : "")),
+      h("ul", { class: "plain water" }, ws.map((x) => h("li", { class: x.waiting_for_size ? "muted" : null },
+        h("b", {}, x.waiting_for_size ? cap(x.said || "water") + ": waiting for its size" : x.amount_oz + " oz"
+          + (x.said && /ml|l$/.test(x.said) ? " (" + x.said + ")" : "") + (x.kind === "sparkling" ? " sparkling" : "")),
+        h("span", { class: "muted" }, " · " + (x.time_said || "no time") + (x.zone_name ? " " + x.zone_name : "") + (x.reported_later ? ", reported later" : ""))))));
+  }
+
+  // REQ-WEB-002 (Today) and REQ-WEB-007 (any past day, shown as Today showed it); supplements and water join after the
+  // meals and the workout (REQ-SUP-010, REQ-SUP-012)
   function dayView(body, d, opts) {
-    body.append(...[summaryCard(d, opts.live), weightCard(d), mealsCard(d, opts.openFood), workoutCard(d)].filter(Boolean));
+    body.append(...[summaryCard(d, opts.live), weightCard(d), mealsCard(d, opts.openFood), workoutCard(d), supplementsCard(d), waterCard(d)].filter(Boolean));
     if ((d.meals || []).length) {
       body.append(h("p", { class: "hint" }, "Something wrong? Tell the coach, for example “the rice in meal 2 was 100 grams”. It fixes the entry and reads it back; refresh to see it here. Editing on this site comes in version 2."));
     }
