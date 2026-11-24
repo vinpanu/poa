@@ -508,6 +508,7 @@ async function passwordBox(box, stepOn) {
     pw1.value = ""; pw2.value = "";
     go.disabled = true;
     say("Changing...");
+    let changed = false;   // once the sign-in service has taken it, every message says so
     try {
       const { data } = await client.auth.getSession();
       const token = data && data.session && data.session.access_token;
@@ -520,6 +521,7 @@ async function passwordBox(box, stepOn) {
       }
       const { error } = await client.auth.updateUser({ password: a });
       if (error) return say("The sign-in service didn't change it (" + error.message + "). Your password is as it was.", true);
+      changed = true;
       const { error: e2 } = await client.auth.signOut({ scope: "others" });
       box.textContent = "";
       box.append(h("h2", {}, "Password"));
@@ -530,7 +532,11 @@ async function passwordBox(box, stepOn) {
       }
       say("");
     } catch {
-      say("POA didn't answer. Nothing was changed: try again in a moment.", true);
+      if (changed) {
+        say("Your password is changed, but POA couldn't finish: reconnect POA in the Claude app (Disconnect, then Connect) when you next use it.", true);
+      } else {
+        say("POA didn't answer. Nothing was changed: try again in a moment.", true);
+      }
     } finally {
       go.disabled = false;
     }
