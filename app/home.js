@@ -320,17 +320,27 @@ const Pages = (() => {
     const wlines = (side) => h("ul", { class: "plain" }, (side.readings || []).map((x) =>
       h("li", {}, h("a", { href: "#/day/" + x.date }, dayShort(x.date)), " · " + Views.reading(x) + " · " + Views.readingTime(x) + (x.note ? " · " + x.note : ""))));
     const hasAvg = (s) => s && s.average_lb !== null && s.average_lb !== undefined;
+    // This week's own state ("No weigh-ins yet", "No finished days yet") is said once, in the row. When this week has no
+    // average and last week has one, last week's still shows, in the row and above its readings, with no change
+    // (REQ-BW-007 ex4); when only last week has none, the change line says so, once (ex5).
+    const twAvg = wt && hasAvg(wt.this_week), lwAvg = wt && hasAvg(wt.last_week);
+    const avgLb = (v) => (v === null || v === undefined ? "–" : Number(v).toFixed(1)); // an average, to one decimal: 183.0
+    const lwLine = !wt ? null
+      : (wt.last_week.readings || []).length
+        ? h("p", { class: "small" }, h("b", {}, "Last week, same days"), twAvg ? null : ": " + wt.last_week.says)
+        : twAvg || !wt.last_week.to ? null
+        : h("p", { class: "muted small" }, "Last week, same days: no weigh-ins");
     const weightRow = wt ? row([
       h("span", { class: "s-main" }, h("span", { class: "s-title" }, "Average weight"),
-        h("span", { class: "s-sub" }, hasAvg(wt.this_week) ? plural(wt.this_week.days, "day") + ", beside last week's same days" : wt.this_week.says)),
-      h("span", { class: "s-right" }, hasAvg(wt.this_week) ? Views.lb(wt.this_week.average_lb) : "–", h("span", { class: "tiny muted" }, " lb")),
+        h("span", { class: "s-sub" }, twAvg ? plural(wt.this_week.days, "day") + ", beside last week's same days"
+          : wt.this_week.says + (lwAvg ? " · last week " + avgLb(wt.last_week.average_lb) + " lb" : ""))),
+      h("span", { class: "s-right" }, twAvg ? avgLb(wt.this_week.average_lb) : "–", h("span", { class: "tiny muted" }, " lb")),
     ], [
-      hasAvg(wt.this_week) ? h("div", { class: "figs" }, h("div", { class: "fig" }, h("span", { class: "label" }, "Weight"),
-        vsLast(wt.this_week.average_lb, wt.last_week.average_lb, (v) => Views.lb(v) + " lb"))) : h("p", { class: "muted small" }, wt.this_week.says),
-      wt.change_says ? h("p", { class: "small" }, wt.change_says) : null,
+      twAvg ? h("div", { class: "figs" }, h("div", { class: "fig" }, h("span", { class: "label" }, "Weight"),
+        vsLast(wt.this_week.average_lb, wt.last_week.average_lb, (v) => avgLb(v) + " lb"))) : null,
+      twAvg && wt.change_says ? h("p", { class: "small" }, wt.change_says) : null,
       (wt.this_week.readings || []).length ? h("p", { class: "small" }, h("b", {}, "This week")) : null, wlines(wt.this_week),
-      (wt.last_week.readings || []).length ? h("p", { class: "small" }, h("b", {}, "Last week, same days")) : h("p", { class: "muted small" }, "Last week, same days: " + (wt.last_week.says || "no weigh-ins")),
-      wlines(wt.last_week),
+      lwLine, wlines(wt.last_week),
       h("p", { class: "tiny muted" }, "Each day's first weigh-in counts; today joins once it's over."),
     ]) : null;
 
