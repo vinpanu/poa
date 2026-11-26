@@ -157,6 +157,10 @@
   });
   const STATUS_LABEL = { done: 'Done', moved: 'Moved', track: 'On track', risk: 'At risk', behind: 'Behind', none: 'No schedule' };
   const chip = st => `<span class="chip ${st}">${STATUS_LABEL[st]}</span>`;
+  // A lane the schedule doesn't cover shows no chip at all.
+  const wsChip = w => w.status === 'none' ? '' : chip(w.status);
+  // Only the owner's role: the owner text up to its first colon, comma or opening bracket.
+  const ownerRole = o => String(o || '').split(/[:,(]/)[0].trim();
   const slug = id => 'ws-' + String(id).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const content = page => (S.feed.content && S.feed.content[page]) || [];
   const section = (page, title) => content(page).find(s => s.title.toLowerCase() === title.toLowerCase()) || { title: '', paras: [], items: [] };
@@ -379,13 +383,13 @@
   // The Jira records behind a stage: requirement records for a requirements stage, the area's build cards
   // for a build stage (trial cards for a test stage), and every card in a release for a release.
   function stageRecords(r) {
-    if (/^requirements$/i.test(r.stage)) { const a = reqArea(r.group); return a ? { list: a.records || [], what: 'requirements still to approve' } : null; }
-    if (/^release$/i.test(r.stage)) { const n = releaseNo(r.item); return n && board() ? { list: rowReleaseCards(r), what: 'cards still open' } : null; }
+    if (/^requirements$/i.test(r.stage)) { const a = reqArea(r.group); return a ? { list: a.records || [], what: 'requirements still to approve', one: 'requirement still to approve' } : null; }
+    if (/^release$/i.test(r.stage)) { const n = releaseNo(r.item); return n && board() ? { list: rowReleaseCards(r), what: 'cards still open', one: 'card still open' } : null; }
     if (/^(build|test)$/i.test(r.stage)) {
       const a = buildArea(r.group);
       if (!a) return null;
       const cards = a.cards || [], trials = cards.filter(isTrial);
-      return { list: /^test$/i.test(r.stage) ? (trials.length ? trials : cards) : cards.filter(c => !isTrial(c)), what: 'cards still open' };
+      return { list: /^test$/i.test(r.stage) ? (trials.length ? trials : cards) : cards.filter(c => !isTrial(c)), what: 'cards still open', one: 'card still open' };
     }
     return null;
   }
@@ -403,7 +407,7 @@
     if (r.finishD && r.finishD - today <= SOON * DAY && (!r.startD || r.startD <= today)) {
       const rec = stageRecords(r);
       const n = rec ? rec.list.filter(isOpen).length : 0;
-      if (n) why.push(`${r.item}: due ${fmtD(r.finishD)} with ${n} ${rec.what}`);
+      if (n) why.push(`${r.item}: due ${fmtD(r.finishD)} with ${n} ${n === 1 ? rec.one : rec.what}`);
     }
     const p = isPaceRow(r) ? pace() : null;
     if (p && p.behind) why.push(`${r.item}: ${p.text}`);
@@ -814,12 +818,23 @@
   }
 
   // ---------- shared blocks ----------
-  const head = (crumb, title, lead) => `<div class="page-head rise"><div class="crumb">${crumb}</div><h1>${esc(title)}</h1>${lead ? `<p class="lead">${esc(lead)}</p>` : ''}</div>`;
+  // How long ago the project data was built: "Updated 12 min ago", "Updated 3 hours ago", else its date.
+  function updatedAgo() {
+    const b = parseDate(S.bundle && S.bundle.builtAt);
+    if (!b) return '';
+    const m = Math.max(0, Math.floor((Date.now() - b) / 60000));
+    if (m < 1) return 'Updated just now';
+    if (m < 60) return `Updated ${m} min ago`;
+    if (m < 1440) { const h = Math.floor(m / 60); return `Updated ${h} hour${h === 1 ? '' : 's'} ago`; }
+    return 'Updated ' + fmtD(b);
+  }
+  const updLine = () => { const u = updatedAgo(); return u ? `<span class="page-upd">${esc(u)}</span>` : ''; };
+  const head = (crumb, title, lead) => `<div class="page-head rise"><div class="head-top"><div class="crumb">${crumb}</div>${updLine()}</div><h1>${esc(title)}</h1>${lead ? `<p class="lead">${esc(lead)}</p>` : ''}</div>`;
   const paras = list => (list || []).map(p => `<p>${esc(p)}</p>`).join('');
   function wsCard(w, i) {
     const p = w.progress;
     const bar = p && p.total ? `<div class="bar"><i style="width:${(p.complete / p.total * 100).toFixed(1)}%;background:${pColor(w)}"></i><i style="width:${((p.partial || 0) / p.total * 100).toFixed(1)}%;background:${pColor(w)}55"></i></div>` : '';
-    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${chip(w.status)}<b>${esc(w.name)}</b>
+    return `<a class="wsc rise" style="--c:${mColor(w.mission)};animation-delay:${i * 50}ms" href="#${slug(w.id)}">${wsChip(w)}<b>${esc(w.name)}</b>
       <div class="now">${w.now ? 'Now: ' + esc(w.now) : ''}${w.next && !w.closed ? '<br>Next: ' + esc(w.next) : ''}</div>${bar}</a>`;
   }
   // When the summary was last checked, the site's copy of the whole document, and the original.
@@ -885,7 +900,7 @@
       (days != null ? kpi(days, ' days', 'to the ' + fmtLong(launch.targetD) + ' launch target', '', '') : '');
     return `
       <section class="hero"><div class="hero-in">
-        <div class="kicker rise">Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
+        <div class="kicker rise head-top"><span>Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</span>${updLine()}</div>
         ${pendingCard()}
         <h1 class="rise">${hlHtml}</h1>
         <p class="rise">${esc(intro)}</p>
@@ -950,8 +965,8 @@
     if (!w) return head('Status', 'Not found', 'That workstream is no longer in the Registry.');
     const p = w.progress;
     return `<div class="wrap">
-      <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="crumb"><a href="#workstreams">Status &rsaquo; Workstreams</a> &rsaquo;</div><h1>${esc(w.name)}</h1>
-        <div>${chip(w.status)} <span class="sub">${esc(w.owner)}${w.updatedDate ? ' · updated ' + esc(ago(w.updatedDate)) : ''}</span></div></div>
+      <div class="ws-head rise" style="--c:${mColor(w.mission)}"><div class="head-top"><div class="crumb"><a href="#workstreams">Status &rsaquo; Workstreams</a> &rsaquo;</div>${updLine()}</div><h1>${esc(w.name)}</h1>
+        <div>${wsChip(w)} <span class="sub">${esc([ownerRole(w.owner), w.updatedDate ? (ownerRole(w.owner) ? 'updated ' : 'Updated ') + ago(w.updatedDate) : ''].filter(Boolean).join(' · '))}</span></div></div>
       ${w.sched && w.sched.why.length ? `<div class="card rise"><h3>${esc(STATUS_LABEL[w.status])}</h3><ul class="why">${w.sched.why.map(t => `<li>${esc(t)}</li>`).join('')}</ul><div class="sub" style="margin-top:8px"><a href="#roadmap">Schedule and milestones &rsaquo;</a></div></div>` : ''}
       <div class="grid g-half">
         ${p && p.total ? `<div class="card rise"><h3>Progress</h3><div class="sub">${esc(p.measure)}</div><div class="chart" id="wsRing" style="height:230px"></div>
@@ -1166,14 +1181,17 @@
         data: Object.keys(byM).sort().map(k => ({ name: MISSION_NAME[k] || 'Mission ' + k, value: byM[k], itemStyle: { color: mColor(k) } })) }],
     });
     const list = $('#decList', root);
+    // Folded by month, the newest open; while the search box has text, the matches show unfolded.
+    const row = d => `<div class="dec" style="--c:${mColor(d.mission || 'all')}"><span class="d">${esc(fmt(d.dateD))}</span><span class="dotm"></span><span>${esc(d.headline)}<span class="id">${esc(d.id)} · ${esc(MISSION_NAME[d.mission || 'all'] || '')}</span></span></div>`;
     const draw = q => {
       const f = ds.filter(d => !q || (d.headline + ' ' + d.id).toLowerCase().includes(q));
-      let month = '', html = '';
+      const months = [];
       f.forEach(d => {
-        const m = d.dateD.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        if (m !== month) { html += `<div class="dec-month">${esc(m)}</div>`; month = m; }
-        html += `<div class="dec" style="--c:${mColor(d.mission || 'all')}"><span class="d">${esc(fmt(d.dateD))}</span><span class="dotm"></span><span>${esc(d.headline)}<span class="id">${esc(d.id)} · ${esc(MISSION_NAME[d.mission || 'all'] || '')}</span></span></div>`;
+        const m = d.dateD.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), g = months[months.length - 1];
+        if (g && g.m === m) g.list.push(d); else months.push({ m, list: [d] });
       });
+      const html = q ? months.map(g => `<div class="dec-month">${esc(g.m)}</div>${g.list.map(row).join('')}`).join('')
+        : months.map((g, i) => `<details class="dec-fold"${i ? '' : ' open'}><summary>${esc(g.m)} · ${g.list.length} ${g.list.length === 1 ? 'decision' : 'decisions'}</summary>${g.list.map(row).join('')}</details>`).join('');
       list.innerHTML = html || '<p class="empty">No decisions match.</p>';
     };
     draw('');
@@ -1190,10 +1208,13 @@
     const h = S.feed.history || [];
     const ws = workstreams().filter(w => w.progress);
     const muted = css('--muted'), grid = css('--chart-grid');
-    chart($('#trend', root), {
-      grid: { left: 40, right: 16, top: 30, bottom: 50 },
+    // The legend is wrapped HTML under the chart, so on a phone it never prints over the plot or the dates.
+    const el = $('#trend', root);
+    if (el && ws.length) el.insertAdjacentHTML('afterend', `<div class="legend trend-legend">${ws.map(w => `<span><i style="background:${mColor(w.mission)}"></i>${esc(w.name)}</span>`).join('')}</div>`);
+    chart(el, {
+      grid: { left: 40, right: 16, top: 30, bottom: 30 },
       tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '' : v + '%' },
-      legend: { bottom: 0, textStyle: { color: muted } },
+      legend: { show: false },
       xAxis: { type: 'category', data: h.map(p => fmt(parseDate(p.date))), axisLabel: { color: muted }, axisLine: { lineStyle: { color: grid } } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: muted, formatter: '{value}%' }, splitLine: { lineStyle: { color: grid } } },
       series: ws.map(w => ({ name: w.name, type: 'line', smooth: true, symbolSize: 8, lineStyle: { width: 3, color: mColor(w.mission) }, itemStyle: { color: mColor(w.mission) },
@@ -1309,10 +1330,12 @@
         data: [{ name: 'Passed', value: t.firstRun.passed, itemStyle: { color: css('--green') } }, { name: 'Incomplete', value: t.firstRun.incomplete, itemStyle: { color: css('--amber') } },
           { name: 'Failed', value: t.firstRun.failed, itemStyle: { color: css('--rose') } }] }],
     });
-    chart($('#t2', root), {
-      grid: { left: 40, right: 16, top: 30, bottom: 30 },
-      xAxis: { type: 'category', data: ['With the specification', 'Without it'], axisLabel: { color: muted }, axisLine: { lineStyle: { color: grid } }, axisTick: { show: false } },
-      yAxis: { type: 'value', min: 150, max: t.cases, axisLabel: { color: muted }, splitLine: { lineStyle: { color: grid } } },
+    // Both bar labels always show, wrapping to a second line when a phone's column is too narrow; the axis starts at 0.
+    const t2 = $('#t2', root), col = t2 ? Math.max(80, Math.floor((t2.clientWidth - 56) / 2) - 12) : 120;
+    chart(t2, {
+      grid: { left: 40, right: 16, top: 30, bottom: 44 },
+      xAxis: { type: 'category', data: ['With the specification', 'Without it'], axisLabel: { color: muted, interval: 0, width: col, overflow: 'break', lineHeight: 15 }, axisLine: { lineStyle: { color: grid } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: t.cases, axisLabel: { color: muted, showMaxLabel: false }, splitLine: { lineStyle: { color: grid } } },
       series: [{ type: 'bar', barMaxWidth: 70, label: { show: true, position: 'top', color: ink, fontWeight: 800 },
         data: [{ value: t.afterFixes.withSpec, itemStyle: { color: css('--teal'), borderRadius: [8, 8, 0, 0] } }, { value: t.afterFixes.withoutSpec, itemStyle: { color: css('--steel'), borderRadius: [8, 8, 0, 0] } }] }],
     });

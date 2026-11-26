@@ -245,6 +245,21 @@ details.more .prose { margin-top: 12px; }
 .health-row:last-child { border-bottom: 0; }
 .health-row .dot { flex: 0 0 12px; height: 12px; border-radius: 50%; }
 .health-row b { display: block; font-size: 15px; } .health-row span { font-size: 13px; color: var(--muted); }
+/* Small fixes, 2026-11 */
+/* When the data was last updated, at the right of the breadcrumb (or the Status page's date line). */
+.head-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; }
+.page-upd { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+/* Progress trends: the legend under the chart. */
+.trend-legend { gap: 6px 14px; margin-top: 4px; }
+.trend-legend span { display: inline-flex; align-items: center; }
+/* Decisions folded by month. */
+details.dec-fold { border-top: 1px solid var(--line); }
+details.dec-fold:first-child { border-top: 0; }
+details.dec-fold > summary { list-style: none; cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; font-family: var(--display); font-size: 15px; font-weight: 700; }
+details.dec-fold > summary::-webkit-details-marker { display: none; }
+details.dec-fold > summary::before { content: "\25B8"; color: var(--muted); display: inline-block; transition: transform .15s ease; }
+details.dec-fold[open] > summary::before { transform: rotate(90deg); }
+details.dec-fold .dec:last-child { border-bottom: 0; }
 .callout { background: color-mix(in srgb, var(--amber) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 18px; padding: 16px; }
 .callout b { font-family: var(--display); font-size: 17px; display: block; }
 .big-num { font-family: var(--display); font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
