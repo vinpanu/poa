@@ -470,3 +470,8 @@ details.sheet summary h2 { margin: 0; }
 .rowcard.pairs p { margin: 0 0 8px; font-size: 14.5px; }
 .rowcard.pairs b { display: inline; font-size: 14.5px; margin: 0 6px 0 0; }
 .rowcard div span { display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); }
+
+/* Integration, 2026-11: every tappable thing at least 36px tall on a phone (the top bar's pill and logo, and the
+   "Read the approved summary" and "Contents" folds). */
+.pill, .nav .logo { min-height: 36px; }
+details.more > summary { padding: 6px 0; }
