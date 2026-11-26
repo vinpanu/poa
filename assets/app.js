@@ -196,13 +196,15 @@
 
   // ---------- for your awareness ----------
   // What the Project Director wants Vince to know without asking him anything (Vince, 2026-11-23), one
-  // line each, from the Registry's Awareness tab. The home page shows the newest five; the full list shows
-  // every line from the last three days in Eastern time, today included, newest first, grouped by day.
-  // Older lines stay in the Registry and simply stop showing. The page cuts the list, not the feed, so a
-  // line leaves on time even when the data was built an hour earlier. Until the feed reads the tab, the
-  // lines can come from the content document instead: bullets under "Awareness" > "Lines", each
-  // "When: Item".
-  const ET = 'America/New_York', AWARE_DAYS = 3, AWARE_HOME = 5, AWARE_MAX = 200;
+  // line each, from the Registry's Awareness tab. The Status page shows only the warnings; the full list
+  // shows every line from the last three days in Eastern time, today included, newest first, grouped by
+  // day. A red the feed sends without a closed date is still open: it stays at the top whatever its age
+  // (2026-11-25). Older lines stay in the Registry and simply stop showing. The page cuts the list, not the
+  // feed, so a line leaves on time even when the data was built an hour earlier. Until the feed reads the
+  // tab, the lines can come from the content document instead: bullets under "Awareness" > "Lines", each
+  // "When: Item"; those have no closed mark, so a red rolls off with the rest. Nothing is cut: a line
+  // shows its first sentence and opens on a tap for the rest.
+  const ET = 'America/New_York', AWARE_DAYS = 3;
   const ID_RE = /\b(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9]{0,7}-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6})?\b/g;
   const etDay = d => d.toLocaleDateString('en-CA', { timeZone: ET });
   const etTime = d => d.toLocaleTimeString('en-US', { timeZone: ET, hour: 'numeric', minute: '2-digit' });
@@ -227,9 +229,21 @@
     const t = z ? new Date(`${y}-${mo}-${d}T${h.padStart(2, '0')}:${mi}:${sec.padStart(2, '0')}${z === 'Z' ? 'Z' : z.replace(/^([+-]\d{2}):?(\d{2})$/, '$1:$2')}`) : etWall(+y, +mo, +d, +h, +mi, +sec);
     return isNaN(t) ? null : t;
   };
-  const awareText = (s, max = AWARE_MAX) => {
+  const awareText = (s, max = Infinity) => {
     let t = String(s == null ? '' : s).replace(ID_RE, '').replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
     return t.length > max ? t.slice(0, max - 1).trim() + '…' : t;
+  };
+  // A text's first sentence and the rest: [first, rest]. A sentence ends at . ! or ? followed by a space
+  // and a capital, a digit or an opening quote, so "1.5 kg" and "e.g. food" don't split.
+  const splitFirst = s => {
+    const m = String(s || '').match(/^(.+?[.!?]["'”’)]?)\s+(?=["'“‘(]?[A-Z0-9])([\s\S]+)$/);
+    return m ? [m[1], m[2]] : [String(s || ''), ''];
+  };
+  // A short title: the first sentence without its full stop, cut at a word boundary near 70 characters.
+  const shortTitle = (s, max = 70) => {
+    let t = splitFirst(s)[0].replace(/\.$/, '');
+    if (t.length > max + 6) { const cut = t.slice(0, max + 1), sp = cut.lastIndexOf(' '); t = (sp > max / 2 ? cut.slice(0, sp) : cut.slice(0, max)).replace(/\s+\S$/, '').replace(/[\s,;:–—-]+$/, '') + '…'; }
+    return t;
   };
   // A warning (Project Director's document, Vince's two lists): amber, something went wrong or is at risk and
   // it is in hand; red, harm done or likely to something of his that is hard to put right. The Registry's
@@ -242,13 +256,14 @@
     const m = String(item == null ? '' : item).match(/^\s*(amber|red)\s*:\s*/i);
     return m ? { level: m[1].toLowerCase(), text: String(item).slice(m[0].length) } : { level: '', text: item };
   };
-  // One line of the list: a warning gets a coloured left edge and its label, not colour alone.
-  const awareLi = (d, l) => `<li${l.level ? ` class="lvl-${l.level}"` : ''}><span class="d">${d}</span><span class="t">${l.level ? `<span class="lvl">${AWARE_LEVEL[l.level]}</span> ` : ''}${esc(l.item)}</span></li>`;
-  // { ready, lines: [{ at, day, time, item, level }] }, newest first, within the last three Eastern days.
+  // Whole days between two Eastern days ("2026-11-25").
+  const dayGap = (later, earlier) => Math.round((Date.parse(later + 'T00:00:00Z') - Date.parse(earlier + 'T00:00:00Z')) / DAY);
+  // { ready, today, open: [open reds, any age], lines: [the rest within the last three Eastern days] }, each
+  // { at, day, time, item, level, open, age, mission }, newest first.
   function awareness(now = new Date()) {
     const a = S.feed.awareness;
-    let raw = null;
-    if (a && a.status === 'ok') raw = (a.lines || []).map(l => ({ when: l.when, item: l.item, level: l.level }));
+    let raw = null, fromFeed = false;
+    if (a && a.status === 'ok') { fromFeed = true; raw = (a.lines || []).map(l => ({ when: l.when, item: l.item, level: l.level, closed: l.closed, mission: l.mission })); }
     else {
       const sec = content('awareness').find(s => s.title.toLowerCase() === 'lines');
       if (sec) raw = sec.items.map(it => {
@@ -257,39 +272,72 @@
         return m ? { when: m[1], item: m[2] } : null;
       }).filter(Boolean);
     }
-    if (!raw) return { ready: false, lines: [] };
+    if (!raw) return { ready: false, today: etDay(now), open: [], lines: [] };
     const today = etDay(now), first = dayShift(today, 1 - AWARE_DAYS);
-    const lines = raw.map(l => {
+    const all = raw.map(l => {
       const { level, text } = awareLevel(l.level, l.item);
       const at = whenOf(l.when), item = awareText(text);
-      return at && item ? { at, day: etDay(at), time: etTime(at), item, level } : null;
-    }).filter(l => l && l.day >= first).sort((p, q) => q.at - p.at);
-    return { ready: true, lines, today };
+      if (!at || !item) return null;
+      const day = etDay(at);
+      return { at, day, time: etTime(at), item, level, mission: l.mission || '', age: Math.max(0, dayGap(today, day)),
+        open: fromFeed && level === 'red' && !String(l.closed == null ? '' : l.closed).trim() };
+    }).filter(Boolean).sort((p, q) => q.at - p.at);
+    return { ready: true, today, open: all.filter(l => l.open), lines: all.filter(l => !l.open && l.day >= first) };
   }
-  // A day's name: Today, Yesterday, else its weekday (short on the home page), and its full date.
+  // A day's name: Today, Yesterday, its weekday within the week, else its date.
   const dayFmt = (day, o) => new Date(day + 'T12:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
-  const awareDay = (day, today, long) => day === today ? 'Today' : day === dayShift(today, -1) ? 'Yesterday' : dayFmt(day, { weekday: long ? 'long' : 'short' });
+  const awareDay = (day, today, long) => day === today ? 'Today' : day === dayShift(today, -1) ? 'Yesterday'
+    : dayGap(today, day) < 7 && dayGap(today, day) > 0 ? dayFmt(day, { weekday: long ? 'long' : 'short' }) : dayFmt(day, { month: 'short', day: 'numeric' });
   const awareDate = day => dayFmt(day, { month: 'long', day: 'numeric' });
   const AWARE_EMPTY = 'Nothing new in the last three days.';
   const AWARE_OFF = 'Not connected yet. The lines appear here as soon as the site can read them.';
+  // One line: the time (and day), a warning's label (and how long an open red has been open), the first
+  // sentence, and the rest on a tap. A warning gets a coloured left edge and its label, not colour alone.
+  function awareLine(l, today, withDay) {
+    const [first, rest] = splitFirst(l.item);
+    const openFor = l.open ? ' · ' + (l.age ? `open ${l.age} ${l.age === 1 ? 'day' : 'days'}` : 'opened today') : '';
+    const lvl = l.level ? `<span class="lvl">${AWARE_LEVEL[l.level]}${openFor}</span>` : '';
+    const row = `<span class="when">${withDay ? esc(awareDay(l.day, today, true)) + '<br>' : ''}${esc(l.time)}</span><span class="aw-t">${lvl}${esc(first)}</span>`;
+    const cls = 'aw' + (l.level ? ' lvl-' + l.level : '');
+    return rest ? `<details class="${cls}"><summary>${row}<span class="caret">&#9656;</span></summary><p>${esc(rest)}</p></details>`
+      : `<div class="${cls}"><div class="aw-row">${row}</div></div>`;
+  }
+  // The Status page's card shows warnings only: open reds first, then the warnings of the last three days,
+  // newest first; every open red and up to three lines in all show, the rest behind See all. With no
+  // warning it is one slim row to the full list.
   function awarenessCard(now) {
-    const A = awareness(now), top = A.lines.slice(0, AWARE_HOME);
-    const sub = !A.lines.length ? 'What the Project Director wants you to know' : A.lines.length > AWARE_HOME
-      ? `The newest ${AWARE_HOME} of ${A.lines.length} from the last three days` : 'From the last three days';
-    const body = !A.ready ? `<p class="empty">${AWARE_OFF}</p>` : top.length
-      ? `<ul class="done-list plain aware">${top.map(l => awareLi(`${esc(awareDay(l.day, A.today))}<br>${esc(l.time)}`, l)).join('')}</ul>`
-      : `<p class="empty">${AWARE_EMPTY}</p>`;
-    return `<div class="card rise" id="sec-awareness"><h3>For your awareness</h3><div class="sub">${sub}${A.lines.length ? ' · <a class="nowrap" href="#awareness">See all&nbsp;&rsaquo;</a>' : ''}</div>${body}</div>`;
+    const A = awareness(now), total = A.open.length + A.lines.length;
+    const warns = A.open.concat(A.lines.filter(l => l.level)), top = Math.max(3, A.open.length);
+    const all = `All ${total} ${total === 1 ? 'line' : 'lines'}&nbsp;&rsaquo;`;
+    if (!A.ready || !warns.length) return `<a class="card slim rise" id="sec-awareness" href="#awareness"><span><b>For your awareness</b><small>${!A.ready ? 'Not connected yet' : 'No warnings in the last three days'}</small></span><span class="go">${A.ready ? all : 'Open&nbsp;&rsaquo;'}</span></a>`;
+    return `<div class="card rise" id="sec-awareness"><div class="card-h"><h3>For your awareness</h3><a class="go-link" href="#awareness">${all}</a></div>
+      <div class="sub">${A.open.length ? 'A red stays until it is closed. ' : ''}Warnings from the last three days, newest first.</div>${warns.slice(0, top).map(l => awareLine(l, A.today, true)).join('')}
+      ${warns.length > top ? `<details class="fold"><summary>See all ${warns.length} warnings</summary>${warns.slice(top).map(l => awareLine(l, A.today, true)).join('')}</details>` : ''}</div>`;
   }
   function pageAwareness(now) {
     const A = awareness(now);
-    const lead = section('awareness', 'Intro').paras[0] || 'What the Project Director wants you to know from the last three days, newest first. Nothing here needs an answer.';
+    const lead = section('awareness', 'Intro').paras[0] || 'A rolling three days: today and the two days before it, newest first. Nothing here needs an answer.';
+    const warn = A.lines.filter(l => l.level).length + A.open.length;
+    const chips = A.ready ? `<div class="aw-filters" role="group" aria-label="Show">${[['all', 'All ' + (A.lines.length + A.open.length)], ['warn', 'Warnings ' + warn]]
+      .map(([k, t], i) => `<button type="button" data-aw="${k}" aria-pressed="${i === 0}">${esc(t)}</button>`).join('')}</div>` : '';
+    const body = !A.ready ? `<div class="card rise"><p class="empty">${AWARE_OFF}</p></div>`
+      : `${A.open.length ? `<div class="card rise"><h3>Still open</h3><div class="sub">A red stays here until it is closed.</div>${A.open.map(l => awareLine(l, A.today, true)).join('')}</div>` : ''}
+        <div class="card rise" id="awList">${awareDays(A, false)}</div>`;
+    return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap aware-page">${chips}${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
+  }
+  // The rolling three days, grouped by day, all lines or only the warnings.
+  function awareDays(A, warnOnly) {
     const days = [];
-    A.lines.forEach(l => { const g = days[days.length - 1]; if (g && g.day === l.day) g.lines.push(l); else days.push({ day: l.day, lines: [l] }); });
-    const body = !A.ready ? `<div class="card rise"><p class="empty">${AWARE_OFF}</p></div>` : !days.length ? `<div class="card rise"><p class="empty">${AWARE_EMPTY}</p></div>`
-      : days.map((g, i) => `<div class="card rise" style="animation-delay:${i * 50}ms"><h3>${esc(awareDay(g.day, A.today, true))}</h3><div class="sub">${esc(awareDate(g.day))} · ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}</div>
-        <ul class="done-list plain aware day">${g.lines.map(l => awareLi(esc(l.time), l)).join('')}</ul></div>`).join('');
-    return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap">${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
+    A.lines.filter(l => !warnOnly || l.level).forEach(l => { const g = days[days.length - 1]; if (g && g.day === l.day) g.lines.push(l); else days.push({ day: l.day, lines: [l] }); });
+    return days.length ? days.map(g => `<div class="day-h">${esc(awareDay(g.day, A.today, true))} <span class="sub">${esc(awareDate(g.day))} · ${g.lines.length} ${g.lines.length === 1 ? 'line' : 'lines'}</span></div>${g.lines.map(l => awareLine(l, A.today, false)).join('')}`).join('')
+      : `<p class="empty">${warnOnly ? 'No warnings in the last three days.' : AWARE_EMPTY}</p>`;
+  }
+  function afterAwareness(root) {
+    const A = awareness(), list = $('#awList', root);
+    root.querySelectorAll('[data-aw]').forEach(b => b.addEventListener('click', () => {
+      root.querySelectorAll('[data-aw]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      if (list) list.innerHTML = awareDays(A, b.dataset.aw === 'warn');
+    }));
   }
 
   // ---------- your pending actions ----------
@@ -298,10 +346,19 @@
   // Director only, in the Registry's Pending actions tab (Order | Action | How long | State | Waits on).
   // Until the feed reads the tab, the lines are bullets under "pending" > "Lines" in the content document,
   // each "Order: Action | How long | State | Waits on". Ready actions come first and stand out, then the
-  // ones that wait, each in order. The whole list shows; past eight, the rest folds behind See all.
-  const PEND_FOLD = 8;
+  // ones that wait, each in order. The Status page shows the first three; the rest are one tap away
+  // (2026-11-25). The feed may also send a short title, a due text and a mission; without a title, the
+  // title is the action's first sentence. Nothing is cut: the whole action opens on a tap.
+  const PEND_TOP = 3;
   const pendState = (state, waitsOn) => /^\s*ready/i.test(state || '') ? 'ready' : /^\s*wait/i.test(state || '') ? 'waits' : String(waitsOn || '').trim() ? 'waits' : 'ready';
-  // { ready, actions: [{ order, action, howLong, state, waitsOn }] }, ready ones first.
+  // Minutes from a how-long text: "About 10 min", "1 hour", "20 to 30 minutes", "a few minutes".
+  const minutesOf = s => {
+    const t = String(s || '').toLowerCase();
+    const m = t.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*(hours?|hrs?|h\b|minutes?|mins?|m\b)/);
+    if (m) { const n = m[2] ? (+m[1] + +m[2]) / 2 : +m[1]; return /^h/.test(m[3]) ? n * 60 : n; }
+    return /half an hour/.test(t) ? 30 : /\ban hour\b/.test(t) ? 60 : /few min/.test(t) ? 5 : /\ba minute\b/.test(t) ? 1 : 0;
+  };
+  // { ready, actions: [{ order, title, action, howLong, due, mission, state, waitsOn }] }, ready ones first.
   function pending() {
     const p = S.feed.pending;
     let raw = null;
@@ -319,24 +376,32 @@
     }
     if (!raw) return { ready: false, actions: [] };
     const num = o => { const n = parseFloat(o); return isNaN(n) ? Infinity : n; };
-    const actions = raw.map((a, i) => ({ i, order: num(a.order), action: awareText(a.action, 300), howLong: awareText(a.howLong, 40),
-      waitsOn: awareText(a.waitsOn, 200), state: pendState(a.state, a.waitsOn) })).filter(a => a.action)
+    const actions = raw.map((a, i) => {
+      const action = awareText(a.action), title = awareText(a.title, 90);
+      return { i, order: num(a.order), action, title: title || shortTitle(action), howLong: awareText(a.howLong, 40), due: awareText(a.due, 40),
+        mission: a.mission || '', waitsOn: awareText(a.waitsOn, 200), state: pendState(a.state, a.waitsOn) };
+    }).filter(a => a.action)
       .sort((x, y) => (x.state === y.state ? 0 : x.state === 'ready' ? -1 : 1) || (x.order === y.order ? 0 : x.order < y.order ? -1 : 1) || x.i - y.i);
     return { ready: true, actions };
   }
   const PEND_EMPTY = 'Nothing needs you right now.';
+  // One action: its number, title, how long and any due text, what a waiting one waits on, and the whole
+  // action on a tap (a row whose title is the whole action doesn't open).
   function pendItem(a, n) {
-    const meta = [a.state === 'ready' ? 'Ready now' : 'Waits', a.howLong].filter(Boolean).join(' · ');
-    return `<li class="pend ${a.state}"><span class="pn">${n}</span><div class="pend-body"><b>${esc(a.action)}</b><span class="pend-meta">${esc(meta)}</span>${a.state === 'waits' && a.waitsOn ? `<span class="pend-wait">Waits on: ${esc(a.waitsOn)}</span>` : ''}</div></li>`;
+    const meta = [esc(a.howLong), a.due ? `<span class="due">${esc(a.due)}</span>` : ''].filter(Boolean).join(' &middot; ');
+    const row = `<span class="pn">${n}</span><span class="pt">${esc(a.title)}${meta || (a.state === 'waits' && a.waitsOn) ? `<small>${meta}${meta && a.state === 'waits' && a.waitsOn ? '<br>' : ''}${a.state === 'waits' && a.waitsOn ? 'Waits on: ' + esc(a.waitsOn) : ''}</small>` : ''}</span>`;
+    const same = a.title.replace(/[.…]$/, '') === a.action.replace(/\.$/, '');
+    return `<li class="${a.state}">${same ? `<div class="prow">${row}</div>` : `<details><summary>${row}<span class="caret">&#9656;</span></summary><p>${esc(a.action)}</p></details>`}</li>`;
   }
+  // Needs you: the first three in order, then See all for the rest, with the ready ones' time in the header.
   function pendingCard() {
-    const P = pending(), list = P.actions, ready = list.filter(a => a.state === 'ready').length, waits = list.length - ready;
-    const sub = !list.length ? 'What needs you, in the Project Director’s order'
-      : [ready ? ready + ' ready now' : 'Nothing ready now', waits ? waits + ' waiting on something first' : ''].filter(Boolean).join(' · ');
+    const P = pending(), list = P.actions, ready = list.filter(a => a.state === 'ready');
+    const mins = Math.round(ready.reduce((n, a) => n + minutesOf(a.howLong), 0) / 5) * 5;
+    const tag = !list.length ? '' : `<span class="pend-tag">${ready.length} ready${ready.length && mins ? ' &middot; about ' + mins + ' min' : ''}</span>`;
     const body = !P.ready ? `<p class="empty">${AWARE_OFF}</p>` : !list.length ? `<p class="empty">${PEND_EMPTY}</p>`
-      : `<ol class="pend-list">${list.slice(0, PEND_FOLD).map((a, i) => pendItem(a, i + 1)).join('')}</ol>` +
-        (list.length > PEND_FOLD ? `<details class="pend-more"><summary>See all ${list.length}</summary><ol class="pend-list">${list.slice(PEND_FOLD).map((a, i) => pendItem(a, PEND_FOLD + i + 1)).join('')}</ol></details>` : '');
-    return `<div class="card rise pend-card" id="sec-pending"><h3>Your pending actions</h3><div class="sub">${esc(sub)}</div>${body}</div>`;
+      : `<ul class="plist">${list.slice(0, PEND_TOP).map((a, i) => pendItem(a, i + 1)).join('')}</ul>` +
+        (list.length > PEND_TOP ? `<details class="fold"><summary>See all ${list.length}</summary><ul class="plist">${list.slice(PEND_TOP).map((a, i) => pendItem(a, PEND_TOP + i + 1)).join('')}</ul></details>` : '');
+    return `<div class="card rise" id="sec-pending"><div class="card-h"><h3>Needs you</h3>${tag}</div>${body}</div>`;
   }
 
   // ---------- schedule status ----------
@@ -879,85 +944,110 @@
   }
 
   // ---------- pages ----------
-  function pageHome() {
-    const ws = workstreams();
-    const prog = ws.filter(w => w.progress && w.progress.total).slice(0, 2);
-    const active = new Set(ws.filter(w => !w.closed).map(w => w.mission));
-    const idle = ['2', '4'].filter(m => !active.has(m));
-    const hl = section('home', 'Headline').paras[0] || 'Building a private AI coach, one approved step at a time.';
-    const intro = section('home', 'Intro').paras[0] || '';
-    const parts = hl.split(/,\s*/);
-    const hlHtml = parts.length > 1 ? `${esc(parts[0])},<br><em>${esc(parts.slice(1).join(', '))}</em>` : `<em>${esc(hl)}</em>`;
-    const launch = roadmapRows().launch;
-    const days = launch ? Math.max(0, Math.ceil((launch.targetD - Date.now()) / DAY)) : null;
-    const decCount = (S.feed.decisions || []).length;
-    const wk = coachingWeek();
-    const kpi = (v, small, label, w, grad) => `<div class="kpi rise"><div class="v"><span data-count="${v}">${v}</span>${small ? `<small>${small}</small>` : ''}</div><div class="l">${esc(label)}</div>${w ? `<div class="spark"><i data-w="${w}" style="width:0;background:${grad}"></i></div>` : ''}</div>`;
-    const kpis = prog.map((w, i) => kpi(w.progress.complete, '/' + w.progress.total, measureLabel(w.progress.measure), (w.progress.complete / w.progress.total * 100).toFixed(1) + '%',
-      /question/i.test(w.progress.measure) ? `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})` : `linear-gradient(90deg, ${css('--teal')}, ${css('--sky')})`)).join('') +
-      (wk ? kpi(wk.done, '/' + wk.min, 'audit questions this week, your minimum ' + wk.min, Math.min(100, wk.done / wk.min * 100).toFixed(1) + '%', `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})`)
-        : kpi(decCount, '', 'decisions recorded', '100%', `linear-gradient(90deg, ${css('--sky')}, ${css('--violet')})`)) +
-      (days != null ? kpi(days, ' days', 'to the ' + fmtLong(launch.targetD) + ' launch target', '', '') : '');
-    return `
-      <section class="hero"><div class="hero-in">
-        <div class="kicker rise head-top"><span>Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</span>${updLine()}</div>
-        ${pendingCard()}
-        <h1 class="rise">${hlHtml}</h1>
-        <p class="rise">${esc(intro)}</p>
-        <div class="kpis">${kpis}</div>
-      </div></section>
-      <div class="wrap">
-        ${awarenessCard()}
-        <div class="card rise" id="sec-glance"><h3>Done, now and next</h3><div class="sub">The last two weeks, today and the next four weeks · <a href="#roadmap">Full schedule &rsaquo;</a></div>${glance()}</div>
-        <div class="grid g-pair">
-          ${prog.map((w, i) => `<div class="card ring rise" style="animation-delay:${80 + i * 60}ms"><h3>${esc(w.name)}</h3><div class="sub">${esc(w.progress.total)} items · ${esc(w.progress.measure)}</div><div class="chart" data-ring="${i}" style="height:250px"></div></div>`).join('')}
-        </div>
-        <div class="grid g2">
-          <div class="card rise"><h3>Schedule to launch</h3><div class="sub">${esc(stateSummary(areas()))} · <a href="#roadmap">Where each area is &rsaquo;</a></div><div class="chart" id="gantt" style="height:300px"></div></div>
-          <div class="card rise"><h3>Decisions per month</h3><div class="sub">${decCount} decisions recorded in the Registry · <a href="#decisions">All decisions &rsaquo;</a></div><div class="chart" id="decBar" style="height:300px"></div></div>
-        </div>
-        <div class="sec-title" id="sec-workstreams">Workstreams</div>
-        <div class="ws-strip">${ws.map(wsCard).join('')}${idle.map(m => `<div class="wsc" style="--c:${mColor(m)}"><span class="chip done">Not started</span><b>${esc(MISSION_NAME[m])}</b><div class="now">Mission ${m} · no active workstream</div></div>`).join('')}</div>
-        <p class="sub">More: <a href="#trends">Progress trends</a> · <a href="#health">Data health</a></p>
-      </div>`;
-  }
-  function afterHome(root) {
-    const ws = workstreams().filter(w => w.progress && w.progress.total).slice(0, 2);
-    root.querySelectorAll('[data-ring]').forEach(el => { const w = ws[+el.dataset.ring]; ring(el, w.progress, pColor(w), window.innerWidth < 560); });
-    scheduleOverview($('#gantt', root), window.innerWidth < 700);
-    decisionBars($('#decBar', root));
-  }
-  // Done, now and next (Vince, 2026-11-13: "a concise visual to see what's been completed recently, what's
-  // up now and what is coming in the near future", at any time). Done: the lanes' recently done lines from
-  // the last two weeks. Now: each area's stages under way or due to have started, worst first (what waits
-  // on Vince is his pending actions list, above). Coming up: each area's next stage starting in the next four weeks, then the launch window.
-  // All read from the Registry and Jira like the rest of the page, so it stays current by itself.
-  const GLANCE_BACK = 14, GLANCE_AHEAD = 28;
-  const lowerFirst = s => /^.[a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
-  function glance() {
-    const ws = workstreams(), today = startOfToday(), until = new Date(+today + GLANCE_AHEAD * DAY);
-    const li = (d, body) => `<li><span class="d">${esc(d)}</span><span class="t">${body}</span></li>`;
-    const list = (items, cls, empty) => items.length ? `<ul class="done-list${cls}">${items.join('')}</ul>` : `<p class="empty">${empty}</p>`;
-    const done = ws.flatMap(w => (w.done || []).map(d => ({ dateD: parseDate(d.date), text: d.text })))
-      .filter(d => d.dateD && daysSince(d.dateD) <= GLANCE_BACK).sort((a, b) => b.dateD - a.dateD).slice(0, 8)
-      .map(d => li(fmt(d.dateD), esc(d.text)));
-    const started = r => !r.done && !r.milestone && (/in progress/i.test(r.status) || (r.startD && r.startD < today));
-    const under = areas().map(a => ({ a, rows: a.rows.filter(started) })).filter(x => x.rows.length).map(x => {
-      const st = rowsState(x.rows).s, due = x.rows.map(r => r.finishD).filter(Boolean).sort((p, q) => p - q)[0];
-      return { st, due, html: `<b>${esc(x.a.name)}</b>: ${esc(x.rows.map(r => lowerFirst(shortItem(r.item, x.a.name))).join(', '))}${st === 'risk' || st === 'behind' ? ' ' + chip(st) : ''}` };
-    }).sort((p, q) => SEVERITY[q.st] - SEVERITY[p.st] || (p.due || 0) - (q.due || 0));
-    const now = under.slice(0, 8).map(u => li(u.due ? 'Due ' + fmt(u.due) : '', u.html));
-    const more = under.length > 8 ? `<p class="sub">And ${under.length - 8} more on the <a href="#roadmap">schedule</a></p>` : '';
-    const next = areas().map(a => a.rows.filter(r => !r.done && !started(r) && r.startD && r.startD >= today && r.startD <= until).sort((p, q) => p.startD - q.startD)[0])
-      .filter(Boolean).sort((p, q) => p.startD - q.startD).slice(0, 6).map(r => li(fmt(r.startD), esc(r.item)));
+  // The Status page (2026-11-25 redesign): about three phone screens. The date line; the status card and
+  // Needs you; the active missions; the warnings and the way from idea to real use; Done, now and next and
+  // the workstreams. Every list shows its top three with the rest one tap away. The headline, the number
+  // tiles, the rings and the two charts left this page; the decisions chart stays on the Decisions page.
+  const HOME_TOP = 3, GLANCE_AHEAD = 28;
+  const WS_ORDER = { behind: 0, risk: 1, track: 2, none: 3, moved: 4, done: 5 };
+  // The areas behind, at risk and on track (each a way into the schedule), the launch window and the next release.
+  function statusCard() {
+    const list = schedule().length ? areas() : [];
+    const n = s => list.filter(a => a.s === s).length;
+    const st = (s, label, c) => `<a class="st" href="#roadmap" style="--c:var(${c})"><b>${n(s)}</b>${label}</a>`;
     const l = milestones().find(m => /launch/i.test(m.title) && !/complete/i.test(m.status));
     const lf = l && parseDate(l.forecastEarliest), ll = l && (parseDate(l.forecastLatest) || lf);
-    const launch = l && (lf || l.targetD) ? `<p class="sub">Launch: ${lf ? 'forecast ' + esc(ll && +ll !== +lf ? fmt(lf) + ' to ' + fmtD(ll) : fmtD(lf)) : ''}${lf && l.targetD ? '; ' : ''}${l.targetD ? 'your target ' + esc(fmt(l.targetD)) : ''}</p>` : '';
-    return `<div class="grid g3 glance">
-      <div><h4>Done recently</h4>${list(done, '', 'Nothing recorded as finished in the last two weeks.')}</div>
-      <div><h4>Now</h4>${list(now, ' plain', 'Nothing under way.')}${more}</div>
-      <div><h4>Coming up</h4>${list(next, ' plain', 'Nothing starts in the next four weeks.')}${launch}</div>
+    const days = l && l.targetD ? Math.max(0, Math.ceil((l.targetD - Date.now()) / DAY)) : null;
+    // "May 17 to Jun 14, 2027": the year once, at the end, when both ends share it.
+    const span = (a, b) => !b || +a === +b ? fmtD(a) : a.getFullYear() === b.getFullYear() ? fmt(a) + ' to ' + fmtD(b) : fmtD(a) + ' to ' + fmtD(b);
+    const launch = l && (lf || l.targetD) ? `<div class="kv"><span class="k">Launch</span><span class="v">${lf ? 'Forecast ' + esc(span(lf, ll)) : 'No forecast yet'}${l.targetD ? `<small>Your target ${esc(fmtD(l.targetD))} &middot; ${days} ${days === 1 ? 'day' : 'days'}</small>` : ''}</span></div>` : '';
+    const rel = schedule().filter(r => /^release$/i.test(r.stage) && !r.done).sort((p, q) => (p.startD || 9e15) - (q.startD || 9e15))[0];
+    let release = '';
+    if (rel) {
+      const name = String(rel.item).replace(/^[^:]*:\s*/, ''), cards = releaseNo(rel.item) ? rowReleaseCards(rel) : [];
+      const done = cards.filter(c => c.cat === 'done').length;
+      release = `<div class="kv"><span class="k">Next release</span><span class="v">${esc(name.charAt(0).toUpperCase() + name.slice(1))}${rel.startD ? ' &middot; ' + esc(fmtD(rel.startD)) : ''}${cards.length
+        ? `<small>${done} of ${cards.length} build cards done</small><span class="hbar"><i style="width:${(done / cards.length * 100).toFixed(1)}%"></i></span>` : ''}</span></div>`;
+    }
+    const counts = list.length ? `<div class="st3">${st('behind', 'behind', '--rose')}${st('risk', 'at risk', '--orange')}${st('track', 'on track', '--green')}</div>` : '';
+    return counts || launch || release ? `<div class="card rise" id="sec-status">${counts}${launch}${release}</div>` : '';
+  }
+  // From idea to real use: one row per step with its numbers; a step without numbers is left out.
+  function pipelineCard() {
+    const lanes = (S.feed.workstreams || []).filter(w => w.progress && w.progress.total);
+    const scope = lanes.find(w => /scope/i.test(w.progress.measure || ''));
+    const tested = lanes.find(w => w !== scope && /test/i.test(w.progress.measure || ''));
+    const r = reqs(), recs = r ? (r.areas || []).flatMap(a => a.records || []) : [];
+    const b = board(), cards = b ? (b.areas || []).flatMap(a => a.cards || []) : [];
+    const rel = schedule().filter(x => /^release$/i.test(x.stage));
+    const rows = [
+      ['Scope defined', scope && scope.progress.complete, scope && scope.progress.total],
+      ['Requirements approved', recs.filter(x => x.cat === 'done').length, recs.length],
+      ['Built and checked', cards.filter(c => c.cat === 'done').length, cards.length],
+      ['Independently tested', tested && tested.progress.complete, tested && tested.progress.total],
+      ['In real use', rel.filter(x => x.done).length, rel.length, rel.length === 1 ? 'release' : 'releases'],
+    ].filter(([, a, t]) => t > 0 && a != null);
+    if (!rows.length) return '';
+    return `<div class="card rise"><div class="card-h"><h3>From idea to real use</h3></div><div class="pipe">${rows.map(([label, a, t, unit]) =>
+      `<div class="pipe-row${a >= t ? ' full' : ''}"><span>${esc(label)}${a >= t ? ' &#10003;' : ''}</span><em>${a} of ${t}${unit ? ' ' + unit : ''}</em><span class="hbar"><i style="width:${Math.min(100, a / t * 100).toFixed(1)}%"></i></span></div>`).join('')}</div></div>`;
+  }
+  // Done, now and next (Vince, 2026-11-13: "a concise visual to see what's been completed recently, what's
+  // up now and what is coming in the near future"), one list of three at a time. Done: the lanes' done
+  // lines from the last three days. Now: each area's stages under way or due to have started, worst first.
+  // Next: each area's next stage starting in the next four weeks. All read from the Registry and Jira.
+  const lowerFirst = s => /^.[a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
+  function glanceLists() {
+    const ws = workstreams(), today = startOfToday(), until = new Date(+today + GLANCE_AHEAD * DAY), since = dayShift(etDay(new Date()), 1 - AWARE_DAYS);
+    const li = (d, body) => `<li><span class="d">${esc(d)}</span><span class="t">${body}</span></li>`;
+    const done = ws.flatMap(w => (w.done || []).map(d => ({ day: String(d.date || '').slice(0, 10), dateD: parseDate(d.date), text: d.text })))
+      .filter(d => d.dateD && d.day >= since).sort((a, b) => b.dateD - a.dateD).map(d => li(fmt(d.dateD), esc(d.text)));
+    const started = r => !r.done && !r.milestone && (/in progress/i.test(r.status) || (r.startD && r.startD < today));
+    const now = areas().map(a => ({ a, rows: a.rows.filter(started) })).filter(x => x.rows.length).map(x => {
+      const st = rowsState(x.rows).s, due = x.rows.map(r => r.finishD).filter(Boolean).sort((p, q) => p - q)[0];
+      return { st, due, html: `${esc(x.a.name)}: ${esc(x.rows.map(r => lowerFirst(shortItem(r.item, x.a.name))).join(', '))}${st === 'risk' || st === 'behind' ? ' ' + chip(st) : ''}` };
+    }).sort((p, q) => SEVERITY[q.st] - SEVERITY[p.st] || (p.due || 0) - (q.due || 0)).map(u => li(u.due ? 'Due ' + fmt(u.due) : '', u.html));
+    const next = areas().map(a => a.rows.filter(r => !r.done && !started(r) && r.startD && r.startD >= today && r.startD <= until).sort((p, q) => p.startD - q.startD)[0])
+      .filter(Boolean).sort((p, q) => p.startD - q.startD).map(r => li(fmt(r.startD), esc(r.item)));
+    return [
+      { k: 'done', label: 'Done', sub: 'The last three days', items: done, empty: 'Nothing recorded as finished in the last three days.',
+        link: ROUTES.history ? ['#history', 'Everything older, in History'] : ['#roadmap', 'The full schedule'] },
+      { k: 'now', label: 'Now', sub: 'Under way, worst first', items: now, empty: 'Nothing under way.', link: ['#roadmap', 'Every area, on the schedule'] },
+      { k: 'next', label: 'Next', sub: 'What starts next', items: next, empty: 'Nothing starts in the next four weeks.', link: ['#roadmap', 'The full schedule'] },
+    ];
+  }
+  function glanceCard() {
+    const L = glanceLists();
+    return `<div class="card rise" id="sec-glance"><div class="card-h"><h3>Done, now and next</h3><span class="seg" role="group" aria-label="Show">${L.map(g =>
+      `<button type="button" data-glance="${g.k}" aria-pressed="${g.k === 'now'}">${g.label}</button>`).join('')}</span></div>
+      ${L.map(g => `<div data-gl="${g.k}"${g.k === 'now' ? '' : ' hidden'}><div class="sub">${esc(g.sub)}${g.items.length > HOME_TOP ? ` &middot; ${HOME_TOP} of ${g.items.length}` : ''}</div>
+        ${g.items.length ? `<ul class="lines">${g.items.slice(0, HOME_TOP).join('')}</ul>` : `<p class="empty">${g.empty}</p>`}<a class="go-link" href="${g.link[0]}">${esc(g.link[1])}&nbsp;&rsaquo;</a></div>`).join('')}</div>`;
+  }
+  // The workstreams, worst first: three shown, the rest behind See all; each opens to now and next.
+  function workstreamsCard() {
+    const ws = workstreams().map((w, i) => ({ w, i })).sort((a, b) => (WS_ORDER[a.w.status] - WS_ORDER[b.w.status]) || a.i - b.i).map(x => x.w);
+    if (!ws.length) return '';
+    const row = w => `<details class="ws"><summary><span class="nm">${esc(w.name)}</span>${wsChip(w)}<span class="caret">&#9656;</span></summary>
+      <p><b>Now:</b> ${esc(w.now || 'Not recorded')}</p>${w.closed ? '' : `<p><b>Next:</b> ${esc(w.next || 'Not recorded')}</p>`}<a class="go-link" href="#${slug(w.id)}">The workstream’s page&nbsp;&rsaquo;</a></details>`;
+    return `<div class="card rise" id="sec-workstreams"><div class="card-h"><h3>Workstreams</h3><span class="sub">Worst first. Tap one for now and next.</span></div>
+      ${ws.slice(0, HOME_TOP).map(row).join('')}${ws.length > HOME_TOP ? `<details class="fold"><summary>See all ${ws.length}</summary>${ws.slice(HOME_TOP).map(row).join('')}</details>` : ''}</div>`;
+  }
+  function pageHome() {
+    // The active missions card comes from the mission pages' own code, when the site has it.
+    const missions = typeof missionsCard === 'function' ? missionsCard() : '';
+    return `<div class="wrap home">
+      <div class="dateline rise"><span>${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</span><span class="upd">${esc(updatedAgo())}</span></div>
+      <div class="hcols">${statusCard()}${pendingCard()}</div>
+      ${missions}
+      <div class="hcols">${awarenessCard()}${pipelineCard()}</div>
+      <div class="hcols">${glanceCard()}${workstreamsCard()}</div>
     </div>`;
+  }
+  // Done, now and next switches its list in place.
+  function afterHome(root) {
+    root.querySelectorAll('[data-glance]').forEach(b => b.addEventListener('click', () => {
+      root.querySelectorAll('[data-glance]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      root.querySelectorAll('[data-gl]').forEach(x => { x.hidden = x.dataset.gl !== b.dataset.glance; });
+    }));
   }
 
   function pageWorkstream(id) {
@@ -1494,7 +1584,7 @@
   }
 
   const ROUTES = {
-    home: [pageHome, afterHome, 'Status'], awareness: [pageAwareness, null, 'For your awareness'],
+    home: [pageHome, afterHome, 'Status'], awareness: [pageAwareness, afterAwareness, 'For your awareness'],
     roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
