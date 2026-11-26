@@ -580,6 +580,7 @@
       { href: '#pending', label: 'Your pending actions', sub: 'What needs you, and what each waits on', ico: '&#10148;', c: '--amber' },
       { href: '#awareness', label: 'For your awareness', sub: 'What’s new in the last three days', ico: '&#9673;', c: '--amber' },
       { href: '#roadmap', label: 'Schedule and milestones', sub: 'Every stage from June to launch', ico: '&#9719;', c: '--sky' },
+      { href: '#history', label: 'History', sub: 'The project month by month', ico: '&#8634;', c: '--steel' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
       { href: '#trends', label: 'Progress trends', sub: 'Coverage over time', ico: '&#9650;', c: '--green' },
       { href: '#health', label: 'Data health', sub: 'When each source last refreshed', ico: '&#9881;', c: '--orange' },
@@ -1379,6 +1380,103 @@
     $('#decSearch', root).addEventListener('input', e => draw(e.target.value.trim().toLowerCase()));
   }
 
+  // ---------- history ----------
+  // The project month by month (the approved sample, 2026-11-25), from data the site already has: schedule
+  // stages finished (by their finish date), milestones reached (actual date, else target), decisions, and
+  // releases finished. Newest month first; a month shows its first eight entries and folds the rest, while a
+  // search or a filter shows every match. A finished Release row is listed once, as a Release, and counts
+  // among the stages finished. Build cards done count by the day their status last changed, leaving out the
+  // day the board was set up (cards started there at their real status), as "Done in the last 7 days" does.
+  const HIST_FOLD = 8;
+  const HIST_KIND = { stage: 'Finished', milestone: 'Milestone', decision: 'Decision', release: 'Release' };
+  const HIST_ORDER = { milestone: 0, release: 1, stage: 2, decision: 3 };
+  const HIST_FILTERS = [['all', 'All'], ['stage', 'Finished'], ['milestone', 'Milestones'], ['decision', 'Decisions'], ['release', 'Releases']];
+  const monthOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const dayOf = d => monthOf(d) + '-' + String(d.getDate()).padStart(2, '0');
+  const monthDate = k => new Date(+k.slice(0, 4), +k.slice(5, 7) - 1, 1);
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  let HIST = null;
+  // { items (newest first), counts per month, months (oldest first, through this month) }
+  function historyData() {
+    const items = [];
+    schedule().filter(r => r.done && !r.milestone && r.finishD).forEach(r => {
+      const rel = /^release$/i.test(r.stage);
+      items.push({ d: r.finishD, kind: rel ? 'release' : 'stage', text: rel ? r.item : r.group + ' · ' + shortItem(r.item, r.group), sub: '' });
+    });
+    milestones().filter(m => /complete/i.test(m.status) && (m.actualD || m.targetD))
+      .forEach(m => items.push({ d: m.actualD || m.targetD, kind: 'milestone', text: m.title, sub: '' }));
+    decisions().forEach(x => items.push({ d: x.dateD, kind: 'decision', text: x.headline, sub: x.id + ' · ' + (MISSION_NAME[x.mission || 'all'] || '') }));
+    items.sort((a, b) => b.d - a.d || HIST_ORDER[a.kind] - HIST_ORDER[b.kind]);
+    const counts = {};
+    const at = m => counts[m] || (counts[m] = { stage: 0, decision: 0, cards: 0 });
+    items.forEach(it => {
+      it.m = monthOf(it.d);
+      it.find = (it.text + ' ' + it.sub).toLowerCase();
+      const c = at(it.m);
+      if (it.kind === 'stage' || it.kind === 'release') c.stage++;
+      else if (it.kind === 'decision') c.decision++;
+    });
+    const b = board(), since = parseDate(S.feed.static && S.feed.static.buildBoardSince);
+    if (b) (b.areas || []).flatMap(a => a.cards || []).forEach(c => {
+      const d = parseDate(c.changed);
+      if (c.cat === 'done' && d && !(since && dayOf(d) <= dayOf(since))) at(monthOf(d)).cards++;
+    });
+    const keys = Object.keys(counts).concat(monthOf(new Date())).sort(), months = [];
+    for (let d = monthDate(keys[0]); monthOf(d) <= keys[keys.length - 1]; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) months.push(monthOf(d));
+    return { items, counts, months };
+  }
+  const histCounts = c => [plural(c.stage, 'stage finished', 'stages finished'), plural(c.decision, 'decision', 'decisions'),
+    c.cards ? plural(c.cards, 'build card done', 'build cards done') : ''].filter(Boolean).join(' · ');
+  const histLi = it => `<li><span class="d">${esc(fmt(it.d))}</span><span class="t">${esc(it.text)}${it.sub ? `<span class="hist-id">${esc(it.sub)}</span>` : ''}</span><span class="hist-kind ${it.kind}">${HIST_KIND[it.kind]}</span></li>`;
+  // The month cards for a search and a filter, as one string.
+  function histList(H, q, kind) {
+    const all = kind === 'all' && !q;
+    const f = H.items.filter(it => (kind === 'all' || it.kind === kind) && (!q || it.find.includes(q)));
+    if (!f.length) return `<div class="card"><p class="empty">${H.items.length ? 'Nothing matches.' : 'Nothing recorded yet.'}</p></div>`;
+    const groups = [];
+    f.forEach(it => { const g = groups[groups.length - 1]; if (g && g.m === it.m) g.items.push(it); else groups.push({ m: it.m, items: [it] }); });
+    return groups.map(g => {
+      const shown = all ? g.items.slice(0, HIST_FOLD) : g.items, rest = all ? g.items.slice(HIST_FOLD) : [];
+      return `<div class="card hist-month" id="hm-${g.m}"><h3>${esc(fmt(monthDate(g.m), { month: 'long', year: 'numeric' }))}</h3><div class="sub">${esc(histCounts(H.counts[g.m]))}</div>
+        <ul class="hist-lines">${shown.map(histLi).join('')}</ul>${rest.length ? `<details class="hist-more"><summary>See all ${g.items.length}</summary><ul class="hist-lines">${rest.map(histLi).join('')}</ul></details>` : ''}</div>`;
+    }).join('');
+  }
+  function pageHistory() {
+    const H = HIST = historyData();
+    const v = k => (H.counts[k] || {}).stage || 0, max = Math.max(1, ...H.months.map(v));
+    const bars = H.months.map(k => {
+      const d = monthDate(k), n = v(k), has = !!H.counts[k];
+      return `<button type="button" class="hist-bar" data-month="${k}"${has ? '' : ' disabled'} aria-label="${esc(fmt(d, { month: 'long', year: 'numeric' }))}: ${plural(n, 'stage', 'stages')} finished"><b>${n}</b><i style="height:${Math.max(3, n / max * 96).toFixed(0)}px"></i><span>${esc(fmt(d, { month: 'short' }))}</span></button>`;
+    }).join('');
+    return head(crumb('history', 'History'), 'History', 'The project month by month: what finished, what was decided and what shipped.') +
+      `<div class="wrap">
+        <div class="card rise"><h3>Stages finished each month</h3><div class="sub">Tap a month to jump to it</div><div class="hist-bars">${bars}</div></div>
+        <input class="search" id="histQ" type="search" placeholder="Search the history" aria-label="Search the history">
+        <div class="hist-filters" role="group" aria-label="Show">${HIST_FILTERS.map(([k, l]) => `<button type="button" data-kind="${k}" aria-pressed="${k === 'all'}">${l}</button>`).join('')}</div>
+        <div class="hist-list" id="histList">${histList(H, '', 'all')}</div></div>`;
+  }
+  // Typing or a filter redraws the list only, so the search box keeps its focus.
+  function afterHistory(root) {
+    const H = HIST, list = $('#histList', root), box = $('#histQ', root);
+    if (!H || !list) return;
+    let kind = 'all';
+    const draw = () => { list.innerHTML = histList(H, box.value.trim().toLowerCase(), kind); };
+    box.addEventListener('input', draw);
+    $('.hist-filters', root).addEventListener('click', ev => {
+      const b = ev.target.closest('[data-kind]');
+      if (!b) return;
+      kind = b.dataset.kind;
+      root.querySelectorAll('.hist-filters [data-kind]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      draw();
+    });
+    const bars = $('.hist-bars', root);
+    bars.scrollLeft = bars.scrollWidth;
+    bars.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-month]'), el = b && document.getElementById('hm-' + b.dataset.month);
+      if (el) el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    });
+  }
+
   function pageTrends() {
     const h = S.feed.history || [];
     return head(crumb('trends', 'Progress trends'), 'Progress trends', 'How coverage grows over time. A point is added each day the site reads the Registry.') +
@@ -1880,7 +1978,7 @@
 
   const ROUTES = {
     home: [pageHome, afterHome, 'Status'], awareness: [pageAwareness, afterAwareness, 'For your awareness'],
-    roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
+    roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], history: [pageHistory, afterHistory, 'History'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
     architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],

@@ -320,6 +320,30 @@ details.more .prose { margin-top: 12px; }
 .dec .d { flex: 0 0 52px; color: var(--muted); font-size: 12.5px; padding-top: 2px; }
 .dec .dotm { flex: 0 0 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--c); }
 .dec .id { display: block; font-size: 12px; color: var(--muted); }
+/* History page */
+.hist-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(34px, 1fr); margin-top: 10px; overflow-x: auto; scrollbar-width: thin; }
+.hist-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 160px; padding: 0 4px; background: none; border: 0; color: var(--ink); }
+.hist-bar b { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.hist-bar i { display: block; width: min(100%, 34px); border-radius: 4px 4px 0 0; background: var(--sky); }
+.hist-bar span { align-self: stretch; margin: 0 -4px; text-align: center; border-top: 1px solid var(--line-2); padding-top: 4px; font-size: 12px; color: var(--muted); }
+.hist-bar:not([disabled]):hover i { background: color-mix(in srgb, var(--sky) 75%, var(--ink)); }
+.hist-bar[disabled] { cursor: default; }
+.hist-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.hist-filters button { min-height: 36px; padding: 6px 14px; border-radius: 99px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 700; }
+.hist-filters button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #04121F; }
+.hist-list { display: grid; gap: 14px; }
+.hist-month { scroll-margin-top: 84px; }
+.hist-month h3 { font-size: 17px; }
+.hist-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.hist-lines li { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.4; }
+.hist-lines li:first-child { border-top: 0; }
+.hist-lines .d { flex: 0 0 48px; color: var(--muted); font-size: 12.5px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.hist-lines .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hist-id { display: block; font-size: 12px; color: var(--muted); }
+.hist-kind { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; padding: 2px 7px; border-radius: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; background: color-mix(in srgb, var(--c) 17%, transparent); color: var(--c); }
+.hist-kind.stage { --c: var(--sky); } .hist-kind.milestone { --c: var(--green); } .hist-kind.decision { --c: var(--violet); } .hist-kind.release { --c: var(--amber); }
+.hist-more > summary { cursor: pointer; color: var(--teal); font-weight: 800; font-size: 13.5px; min-height: 36px; padding: 9px 0 2px; border-top: 1px solid var(--line); }
+.hist-more[open] > summary { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .health-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .health-row:last-child { border-bottom: 0; }
 .health-row .dot { flex: 0 0 12px; height: 12px; border-radius: 50%; }
