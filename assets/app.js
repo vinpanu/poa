@@ -623,6 +623,7 @@
 
   function buildMenus() {
     addFeedMenus();
+    addMissionMenus();
     $('#menu').innerHTML = MENU.map(m => `<button type="button" data-drop="${m.key}" aria-expanded="false">${esc(m.label)}<span class="car">&#9662;</span></button>`).join('');
     $('#mobileMenu').innerHTML = `<div class="mm-head"><span class="logo"><i>POA</i>POA</span><button type="button" class="icon-btn" id="mmClose" aria-label="Close menu">&#10005;</button></div>` +
       MENU.map(m => `<div class="mm-group"><div class="mm-label">${esc(m.label)}</div>${m.groups ? m.groups.map(groupTiles).join('') : m.items.map(tile).join('')}</div>`).join('') +
@@ -1358,6 +1359,209 @@
       : 'Not available';
   }
 
+  // ---------- mission pages ----------
+  // One standard page per active mission (Vince, 2026-11-25): where it stands; Path to green, only when it is not
+  // green; one plan that shows now and the next three, with the rest folded; and what is done. The status, counts,
+  // plan and dates come from the Schedule groups the mission names and the Jira records behind them. Only the tag,
+  // purpose, where it stands, the next three and Path to green are written by hand. The list is the feed's missions
+  // only (the Registry, once the Project Director's Missions tab exists), each { key, name, tag, purpose, stands,
+  // next: [up to three], path: [{ do, clears }] or ["do | clears"], updated, groups: [Schedule group names] or
+  // "a; b", plan: "stages" or "releases" }. Until the feed sends them there are no mission pages, no Active missions
+  // card and no menu entries. The content document's page "missions" is the Missions explainer, not this list.
+  const MISSION_STALE = 7, MISSION_DONE_TOP = 3, MISSION_DONE_MAX = 12;
+  const missionKey = k => String(k == null ? '' : k).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  function missionsRaw() { return Array.isArray(S.feed.missions) ? S.feed.missions : []; }
+  // A group's short name: "Shared foundation (Missions 2–4)" and "Fitbit: sleep, steps…" read "Shared foundation" and "Fitbit".
+  const groupLabel = g => String(g).replace(/\s*\([^)]*\)/g, '').split(':')[0].trim();
+  const relLabel = item => String(item).replace(/^Capture release\b/i, 'Release');
+  // "Dec 21 to Jan 15, 2027", "Feb 26 to Apr 30, 2027", or one date.
+  const dateSpan = (a, b) => {
+    if (!a) return b ? fmtD(b) : '';
+    if (!b || Math.abs(b - a) < DAY) return fmtD(a);
+    const thisYear = new Date().getFullYear();
+    return (a.getFullYear() === b.getFullYear() || a.getFullYear() === thisYear ? fmt(a) : fmtD(a)) + ' to ' + fmtD(b);
+  };
+  const firstSentence = (s, max = 110) => {
+    const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(), x = t.match(/^(.+?[.!?])(?=\s|$)/);
+    const f = x ? x[1] : t;
+    if (f.length <= max) return f;
+    const cut = f.slice(0, max), sp = cut.lastIndexOf(' ');
+    return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[,;:]$/, '') + '…';
+  };
+  // The missions with what the site works out for each: its groups, status (the worst of them), counts by state,
+  // numbers, milestone and plan rows.
+  function missions() {
+    const all = areas(), sched = schedule(), seen = new Set();
+    const b = board(), r = reqs();
+    return missionsRaw().map(raw => {
+      if (!raw || !raw.name) return null;
+      const key = missionKey(raw.key || raw.name);
+      if (!key || seen.has(key)) return null;
+      seen.add(key);
+      const names = (Array.isArray(raw.groups) ? raw.groups : String(raw.groups || '').split(';')).map(x => String(x).trim()).filter(Boolean);
+      // A name matches its group exactly, else by area name ("Shared foundation"), else as the start of one ("Mission 1B").
+      const groups = [];
+      names.forEach(n => {
+        const l = n.toLowerCase();
+        let hit = all.filter(a => a.name === n);
+        if (!hit.length) hit = all.filter(a => areaKey(a.name) === areaKey(n));
+        if (!hit.length) hit = all.filter(a => a.name.toLowerCase().startsWith(l));
+        hit.forEach(a => { if (!groups.includes(a)) groups.push(a); });
+      });
+      const keys = new Set(groups.map(g => areaKey(g.name)));
+      const sev = s => SEVERITY[s] || 0;
+      const s = groups.length ? groups.reduce((m, g) => sev(g.s) > sev(m) ? g.s : m, 'done') : null;
+      const count = st => groups.filter(g => (st === 'done' ? g.s === 'done' || g.s === 'moved' : g.s === st)).length;
+      const rows = groups.flatMap(g => g.rows);
+      const stages = rows.filter(x => !x.milestone);
+      const cards = b ? (b.areas || []).filter(a => keys.has(areaKey(a.name))).flatMap(a => a.cards || []) : [];
+      const records = r ? (r.areas || []).filter(a => keys.has(areaKey(a.name))).flatMap(a => a.records || []) : [];
+      // Its milestone: the groups' own last milestone, else the completion milestone of the mission that does most
+      // of the groups' stages' delivery missions, taking the one with the latest target.
+      const end = x => +(x.finishD || x.startD || 0);
+      let ms = rows.filter(x => x.milestone).sort((p, q) => end(p) - end(q)).pop() || null;
+      if (!ms && stages.length) {
+        const own = new Set(stages.map(x => String(x.mission)).filter(x => x && x !== '0' && x !== 'all'));
+        const tgt = x => { const m = milestones().find(y => y.id === x.milestone); return +((m && m.targetD) || 0); };
+        ms = sched.filter(x => x.milestone && own.has(String(x.mission)) && !rows.includes(x)).sort((p, q) => tgt(p) - tgt(q) || end(p) - end(q)).pop() || null;
+      }
+      const msInfo = ms ? milestones().find(y => y.id === ms.milestone) : null;
+      // The plan: the Release rows the groups ship in, or every stage of the groups, in date order.
+      const byDate = (p, q) => (p.startD ? +p.startD : 9e15) - (q.startD ? +q.startD : 9e15) || (p.finishD ? +p.finishD : 9e15) - (q.finishD ? +q.finishD : 9e15);
+      let plan = String(raw.plan || '').toLowerCase() === 'releases' ? 'releases' : 'stages';
+      let planRows = plan === 'releases' ? sched.filter(x => /^release$/i.test(x.stage) && releaseNo(x.item) && releaseAreas(x).some(a => keys.has(areaKey(a.name)))) : [];
+      if (!planRows.length) { plan = 'stages'; planRows = stages.slice(); }
+      planRows.sort(byDate);
+      const list = v => (Array.isArray(v) ? v : v ? [v] : []).map(x => String(x == null ? '' : x).trim()).filter(Boolean);
+      const path = (Array.isArray(raw.path) ? raw.path : []).map(p => typeof p === 'string' ? (([d, c]) => ({ do: d, clears: c }))(p.split('|').map(x => x.trim())) : p)
+        .filter(p => p && String(p.do || '').trim()).map(p => ({ do: String(p.do).trim(), clears: String(p.clears || '').trim() }));
+      return {
+        key, name: String(raw.name).trim(), tag: String(raw.tag || '').trim(), purpose: String(raw.purpose || '').trim(), stands: String(raw.stands || '').trim(),
+        next: list(raw.next).slice(0, 3), path, updatedD: parseDate(raw.updated), handWritten: !!(raw.stands || list(raw.next).length || path.length),
+        groups, s, counts: { behind: count('behind'), risk: count('risk'), track: count('track'), done: count('done') },
+        stages, cards, records, ms, msInfo, plan, planRows,
+      };
+    }).filter(Boolean);
+  }
+  const missionByRoute = route => missions().find(m => 'mission-' + m.key === route);
+  // A row's name on a mission page: a release as "Release 2a: …", a stage under its group's short name when the
+  // mission has more than one group.
+  function missionRowLabel(m, r) {
+    if (/^release$/i.test(r.stage)) return relLabel(r.item);
+    const s = shortItem(r.item, r.group);
+    if (m.groups.length <= 1) return s;
+    return s === r.item && /:/.test(s) ? s : groupLabel(r.group) + ': ' + lowerFirst(s);
+  }
+  // "Coaching knowledge complete is forecast Feb 12 to Mar 12, 2027, 2 to 3 months after the target of Nov 30, 2026."
+  function missionTarget(m) {
+    const r = m.ms;
+    if (!r) return '';
+    const name = m.name + ' complete', t = m.msInfo && m.msInfo.targetD;
+    if (r.done) return `${name}: done ${fmtD(r.finishD)}${t ? ', against a target of ' + fmtD(t) : ''}.`;
+    if (!r.startD) return `${name}: no forecast yet${t ? ', against a target of ' + fmtD(t) : ''}.`;
+    const to = r.finishD || r.startD;
+    if (!t) return `${name} is forecast ${dateSpan(r.startD, to)}.`;
+    const sl = slip(t, r.startD, to), late = sl !== 'on or before target';
+    return `${late && (m.s === 'track') ? 'On track to the agreed dates. ' : ''}${name} is forecast ${dateSpan(r.startD, to)}, ${late ? sl.replace(/target$/, 'the target of ' + fmtD(t)) : 'on or before its target of ' + fmtD(t)}.`;
+  }
+  function missionCounts(m) {
+    if (m.groups.length < 2) return '';
+    const parts = [['behind', 'behind'], ['risk', 'at risk'], ['track', 'on track'], ['done', 'done']].filter(([k]) => m.counts[k]).map(([k, w]) => m.counts[k] + ' ' + w);
+    return parts.length ? parts[0].replace(/^(\d+) /, (x, n) => n + (n === '1' ? ' area ' : ' areas ')) + (parts.length > 1 ? ', ' + parts.slice(1).join(', ') : '') + '.' : '';
+  }
+  function pageMission(route) {
+    const m = missionByRoute(route);
+    const crumbHtml = `${esc(MENU[0].label)} &rsaquo; <b>Missions</b>`;
+    if (!m) return head(crumbHtml, 'Not found', 'That mission is not on the list of active missions.') + '<div class="wrap"><p class="sub mis-back"><a href="#home">&lsaquo; Back to Status</a></p></div>';
+    const green = m.s === 'track' || m.s === 'done';
+    const today = startOfToday();
+    const label = r => missionRowLabel(m, r);
+    const stDone = m.stages.filter(r => r.done).length, cDone = m.cards.filter(c => c.cat === 'done').length, rDone = m.records.filter(x => x.cat === 'done').length;
+    const facts = [m.stages.length ? [`${stDone} of ${m.stages.length}`, 'stages done'] : null, m.cards.length ? [`${cDone} of ${m.cards.length}`, 'build cards done'] : null,
+      m.records.length ? [`${rDone} of ${m.records.length}`, 'requirements approved'] : null].filter(Boolean);
+    const tgt = [missionCounts(m), missionTarget(m)].filter(Boolean).join(' ');
+    const upd = m.updatedD ? `Hand-written parts updated ${esc(fmtD(m.updatedD))}${daysSince(m.updatedD) > MISSION_STALE ? ' · <span class="mis-stale">may be out of date</span>' : ''}`
+      : m.handWritten ? 'Hand-written parts not dated · <span class="mis-stale">may be out of date</span>' : '';
+    const stands = `<div class="card rise mis-card"><div class="mis-h"><h3>Where it stands</h3>${m.s ? chip(m.s) : ''}</div>
+      ${m.stands ? `<p class="mis-line">${esc(m.stands)}</p>` : ''}${tgt ? `<p class="mis-tgt">${esc(tgt)}</p>` : ''}
+      ${!m.groups.length ? '<p class="empty">None of this mission’s schedule groups are in the schedule.</p>' : ''}
+      ${facts.length ? `<div class="mis-facts">${facts.map(f => `<div class="mis-fact"><b>${esc(f[0])}</b><span>${esc(f[1])}</span></div>`).join('')}</div>` : ''}
+      ${green ? '<p class="mis-green">&#10003; Green. Nothing to fix.</p>' : ''}</div>`;
+    // Path to green: the hand-kept steps, lettered; with none, the reasons the schedule gives, so it is never empty.
+    let path = '';
+    if (m.s && !green) {
+      const word = ['', 'this one thing', 'these two', 'these three', 'these four', 'these five'][m.path.length] || 'these';
+      const why = m.groups.filter(g => g.why && g.why.length).flatMap(g => g.why);
+      path = m.path.length
+        ? `<div class="card rise"><div class="mis-h"><h3>Path to green</h3><span class="mis-src">Kept by hand</span></div>
+          <div class="sub">Do ${word} and every area of ${esc(lowerFirst(m.name))} is on track.</div>
+          <ol class="mis-todo path">${m.path.map(p => `<li><span><b>${esc(p.do)}</b>${p.clears ? `<small>${esc(p.clears)}</small>` : ''}</span></li>`).join('')}</ol></div>`
+        : `<div class="card rise"><div class="mis-h"><h3>Path to green</h3><span class="mis-src">From the schedule</span></div>
+          <div class="sub">No steps written yet. What keeps ${esc(lowerFirst(m.name))} from green:</div>
+          ${why.length ? `<ul class="why">${why.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : `<p class="empty">The schedule gives no reason.</p>`}</div>`;
+    }
+    // The plan: now, the next three, then the rest and what is done folded as a stepper, ending with the milestone.
+    const open = m.planRows.filter(r => !r.done), done = m.planRows.filter(r => r.done);
+    const now = open[0];
+    const stateWord = r => { const st = rowState(r).s; return st === 'risk' || st === 'behind' ? st : ''; };
+    let nowBox = '';
+    if (now) {
+      const n = m.plan === 'releases' ? (() => { const c = rowReleaseCards(now); return c.length ? `${c.filter(x => x.cat === 'done').length} of ${c.length} build cards done` : ''; })()
+        : `stage ${m.planRows.indexOf(now) + 1} of ${m.planRows.length}`;
+      const started = now.startD && now.startD <= today || /in progress/i.test(now.status);
+      const st = stateWord(now);
+      nowBox = `<div class="mis-now"><span class="mis-nowtag">${started ? 'Now' : 'Next up'}</span>${st ? ' ' + chip(st) : ''}<b>${esc(label(now))}</b>
+        <small>${esc([dateSpan(now.startD, now.finishD), n].filter(Boolean).join(' · '))}</small></div>`;
+    }
+    const auto = !m.next.length;
+    const nextRows = auto ? open.slice(1, 4) : [];
+    const nextHtml = auto ? nextRows.map(r => `<li><span><b>${esc(label(r))}</b><small>${esc([dateSpan(r.startD, r.finishD), stateWord(r) ? STATUS_LABEL[stateWord(r)] : ''].filter(Boolean).join(' · '))}</small></span></li>`)
+      : m.next.map(t => `<li><span>${esc(t)}</span></li>`);
+    const later = open.slice(auto ? 4 : 1);
+    const step = (b, small, cls, mk) => `<li class="${cls}"><span class="mk">${mk}</span><b>${esc(b)}</b>${small ? `<small>${esc(small)}</small>` : ''}</li>`;
+    const t = m.msInfo && m.msInfo.targetD;
+    const msSmall = m.ms ? [m.ms.startD ? 'Forecast ' + dateSpan(m.ms.startD, m.ms.finishD || m.ms.startD) : 'No forecast yet', t ? 'against a target of ' + fmtD(t) : ''].filter(Boolean).join(', ') : '';
+    const msStep = m.ms && !m.ms.done ? step(m.name + ' complete', msSmall, 'end', '') : '';
+    const laterHtml = later.map(r => step(label(r), [dateSpan(r.startD, r.finishD), stateWord(r) ? STATUS_LABEL[stateWord(r)] : ''].filter(Boolean).join(' · '), 'todo', '')).join('') + msStep;
+    const doneSteps = done.map(r => step(label(r), dateSpan(r.startD, r.finishD), 'done', '&#10003;')).join('') +
+      (m.ms && m.ms.done ? step(m.name + ' complete', 'Done ' + fmtD(m.ms.finishD), 'done end', '&#10003;') : '');
+    const fold = laterHtml || doneSteps ? `<details class="mis-more"><summary>See the whole plan</summary>
+      ${laterHtml ? `<div class="mis-g">${auto ? 'After those' : 'Still to come'}</div><ol class="mis-steps">${laterHtml}</ol>` : ''}
+      ${doneSteps ? `<div class="mis-g">Already done</div><ol class="mis-steps">${doneSteps}</ol>` : ''}</details>` : '';
+    const planCard = `<div class="card rise"><div class="mis-h"><h3>The plan</h3><span class="mis-src">From the schedule</span></div>
+      ${nowBox || `<p class="empty">${m.planRows.length ? 'Every step of the plan is done.' : 'No stages in the schedule yet.'}</p>`}
+      ${nextHtml.length ? `<div class="mis-g">Next three</div><ol class="mis-todo">${nextHtml.join('')}</ol>` : ''}${fold}</div>`;
+    // Done so far: finished stages (and releases), newest first.
+    const finished = m.stages.concat(m.plan === 'releases' ? done : []).filter(r => r.done && r.finishD).sort((p, q) => q.finishD - p.finishD);
+    const shown = finished.slice(0, MISSION_DONE_MAX);
+    const li = r => `<li><span class="d">${esc(fmtD(r.finishD))}</span><span class="t">${esc(label(r))}</span></li>`;
+    const doneCard = `<div class="card rise"><div class="mis-h"><h3>Done so far</h3><span class="mis-src">From the schedule</span></div>
+      ${shown.length ? `<ul class="mis-lines">${shown.slice(0, MISSION_DONE_TOP).map(li).join('')}</ul>` : '<p class="empty">Nothing finished yet.</p>'}
+      ${shown.length > MISSION_DONE_TOP ? `<details class="mis-more"><summary>See all ${shown.length}</summary><ul class="mis-lines">${shown.slice(MISSION_DONE_TOP).map(li).join('')}</ul>
+        ${finished.length > shown.length ? `<p class="sub mis-back">${finished.length - shown.length} earlier stages: <a href="#roadmap">Schedule and milestones &rsaquo;</a></p>` : ''}</details>` : ''}</div>`;
+    const h = head(crumbHtml, m.name, m.purpose);
+    return (m.tag ? h.replace('<h1>', `<div class="mis-tag">${esc(m.tag)}</div><h1>`) : h) +
+      `<div class="wrap mis-page">${upd ? `<p class="sub mis-upd">${upd}</p>` : ''}${stands}${path}
+      <div class="mis-cols">${planCard}${doneCard}</div>
+      <p class="sub">The plan, its dates, the status and the counts build themselves from the schedule and Jira.${m.handWritten ? ' Where it stands, the next three and Path to green are written by hand.' : ''}</p>
+      <p class="sub mis-back"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
+  }
+  // The Status page's "Active missions" card: one row per mission, each opening its page. Empty with no missions.
+  function missionsCard() {
+    const list = missions();
+    if (!list.length) return '';
+    return `<div class="card rise mis-list" id="sec-missions"><div class="mis-h"><h3>Active missions</h3><span class="sub">${list.length === 1 ? 'One mission' : list.length + ' missions'} under way</span></div>
+      ${list.map(m => `<a class="mis-row" href="#mission-${esc(m.key)}"><span class="nm">${esc(m.name)}${m.stands ? `<small>${esc(firstSentence(m.stands))}</small>` : ''}</span>${m.s ? chip(m.s) : ''}<span class="car" aria-hidden="true">&#9656;</span></a>`).join('')}</div>`;
+  }
+  // Each mission in the Status menu, right after Status overview.
+  function addMissionMenus() {
+    const items = MENU[0].items.filter(i => !/^#mission-/.test(i.href));
+    let list = [];
+    try { list = missions(); } catch (e) { console.error(e); }
+    items.splice(items.findIndex(i => i.href === '#home') + 1, 0, ...list.map(m => ({ href: '#mission-' + m.key, label: 'Mission: ' + lowerFirst(m.name), sub: 'Where it stands, the plan and what’s done', ico: '&#9873;', c: '--violet' })));
+    MENU[0].items = items;
+  }
+
   const OBJ_COLORS = ['--teal', '--sky', '--violet', '--purple', '--green', '--orange', '--amber', '--steel'];
   function pageGoal() {
     const o = section('goal', 'Overall objective');
@@ -1617,6 +1821,10 @@
         view.innerHTML = pageDoc(route);
         afterDoc(view, route);
         title = 'Document';
+      } else if (/^mission-[a-z0-9-]+$/.test(route)) {
+        view.innerHTML = pageMission(route);
+        const m = missionByRoute(route);
+        title = m ? m.name : 'Mission';
       } else {
         const r = ROUTES[route] || ROUTES.home;
         view.innerHTML = r[0]();

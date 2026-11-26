@@ -386,6 +386,65 @@ details.area[open] > summary .area-top b::before { transform: rotate(90deg); }
 @media (max-width: 700px) { .area-cols { grid-template-columns: 1fr; } }
 .ws-head { border-radius: var(--r); padding: 20px; background: linear-gradient(135deg, color-mix(in srgb, var(--c) 24%, var(--panel)), var(--panel)); border: 1px solid var(--line); }
 .ws-head h1 { margin: 6px 0 4px; font-size: clamp(26px, 4vw, 34px); }
+/* Mission pages */
+.mis-tag { font-size: 12.5px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--teal); margin-top: 6px; }
+.mis-tag + h1 { margin-top: 2px; }
+.mis-page { padding-top: 14px; }
+.mis-upd { margin: 0; }
+.mis-stale { color: var(--amber); font-weight: 700; }
+.mis-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.mis-h h3 { margin: 0; }
+.mis-src { font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; border: 1px solid var(--line-2); color: var(--muted); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.mis-line { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.mis-tgt { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.mis-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin-top: 12px; }
+.mis-fact { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 10px; min-width: 0; }
+.mis-fact b { display: block; font-family: var(--display); font-size: 19px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.mis-fact span { display: block; font-size: 12px; color: var(--muted); line-height: 1.3; margin-top: 3px; }
+.mis-green { margin: 12px 0 0; font-size: 14.5px; font-weight: 700; color: var(--green); }
+.mis-cols { display: grid; gap: 18px; }
+.mis-cols > * { min-width: 0; }
+@media (min-width: 900px) { .mis-cols { grid-template-columns: 1fr 1fr; align-items: start; } }
+@media (max-width: 560px) { .mis-cols { gap: 14px; } }
+.mis-g { font-size: 12px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); margin: 14px 0 0; }
+.mis-now { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-top: 8px; }
+.mis-nowtag { display: inline-block; font-size: 11.5px; font-weight: 800; border-radius: 99px; padding: 2px 10px; background: color-mix(in srgb, var(--teal) 17%, transparent); color: var(--teal); }
+.mis-now b { display: block; margin-top: 5px; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.mis-now small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.mis-todo { list-style: none; margin: 6px 0 0; padding: 0; counter-reset: t; }
+.mis-todo li { counter-increment: t; display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.4; }
+.mis-todo li:first-child { border-top: 0; }
+.mis-todo li::before { content: counter(t); flex: 0 0 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; border: 1px solid var(--line-2); color: var(--muted); margin-top: 1px; }
+.mis-todo.path li::before { content: counter(t, upper-alpha); border-color: var(--ink-2); color: var(--ink); }
+.mis-todo li > span { min-width: 0; overflow-wrap: anywhere; }
+.mis-todo li b { display: block; } .mis-todo li small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+details.mis-more { margin-top: 8px; }
+details.mis-more > summary { cursor: pointer; list-style: none; display: flex; align-items: center; min-height: 40px; color: var(--teal); font-weight: 800; font-size: 14px; border-top: 1px solid var(--line); }
+details.mis-more > summary::-webkit-details-marker { display: none; }
+details.mis-more > summary::before { content: "\25B8"; margin-right: 8px; display: inline-block; transition: transform .15s ease; }
+details.mis-more[open] > summary::before { transform: rotate(90deg); }
+.mis-steps { list-style: none; margin: 10px 0 0; padding: 0; }
+.mis-steps li { position: relative; padding: 0 0 14px 30px; font-size: 14.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.mis-steps li::before { content: ""; position: absolute; left: 8px; top: 21px; bottom: -1px; width: 2px; background: var(--line-2); }
+.mis-steps li:last-child { padding-bottom: 2px; } .mis-steps li:last-child::before { display: none; }
+.mis-steps .mk { position: absolute; left: 0; top: 1px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; border: 2px solid var(--line-2); background: var(--panel); }
+.mis-steps .done .mk { background: var(--steel); border-color: var(--steel); color: var(--panel); }
+.mis-steps .end .mk { border-radius: 3px; transform: rotate(45deg) scale(.85); border-color: var(--muted); }
+.mis-steps .done.end .mk { border-color: var(--steel); }
+.mis-steps b { display: block; } .mis-steps small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.mis-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.mis-lines li { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.4; }
+.mis-lines li:first-child { border-top: 0; }
+.mis-lines .d { flex: 0 0 62px; color: var(--muted); font-size: 12.5px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.mis-lines .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mis-back { margin: 0; }
+.mis-back a { display: inline-block; padding: 10px 0; min-height: 40px; font-weight: 800; }
+.mis-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 0; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 15px; }
+.mis-h + .mis-row { border-top: 0; }
+.mis-row .nm { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.mis-row .nm small { display: block; font-weight: 500; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.mis-row .car { color: var(--muted); font-size: 12px; }
+.mis-row:hover .nm { color: var(--teal); }
 
 /* ---------- zoom overlay ---------- */
 .zoom { position: fixed; inset: 0; z-index: 60; background: rgba(4,10,24,.94); display: flex; flex-direction: column; }
