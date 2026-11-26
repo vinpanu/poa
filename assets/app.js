@@ -1035,7 +1035,7 @@
     // The active missions card comes from the mission pages' own code, when the site has it.
     const missions = typeof missionsCard === 'function' ? missionsCard() : '';
     return `<div class="wrap home">
-      <div class="dateline rise"><span>${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</span><span class="upd">${esc(updatedAgo())}</span></div>
+      <div class="dateline rise"><h1>Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</h1><span class="upd">${esc(updatedAgo())}</span></div>
       <div class="hcols">${statusCard()}${pendingCard()}</div>
       ${missions}
       <div class="hcols">${awarenessCard()}${pipelineCard()}</div>
