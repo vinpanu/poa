@@ -1265,11 +1265,11 @@
     }
     series[0].markLine = { symbol: 'none', silent: true, label: { formatter: 'Today', color: amber, fontWeight: 800, fontSize: 11 }, lineStyle: { color: amber, width: 2, type: 'solid' }, data: [{ xAxis: today }] };
     chart(el, {
-      grid: { left: 36, right: 14, top: 18, bottom: 46 },
+      grid: { left: 36, right: 34, top: 18, bottom: 46 },
       tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '' : Math.round(v) },
       legend: { bottom: 0, textStyle: { color: muted, fontSize: 12 } },
       xAxis: { type: 'time', min: from, max: end, splitNumber: window.innerWidth < 560 ? 3 : 6,
-        axisLabel: { color: muted, fontSize: 11, hideOverlap: true, formatter: v => fmtD(new Date(v)) }, axisLine: { lineStyle: { color: grid } }, splitLine: { show: false } },
+        axisLabel: { color: muted, fontSize: 11, hideOverlap: true, alignMinLabel: 'left', alignMaxLabel: 'right', formatter: v => fmtD(new Date(v)) }, axisLine: { lineStyle: { color: grid } }, splitLine: { show: false } },
       yAxis: { type: 'value', min: Math.max(0, Math.floor((p.base - 5) / 10) * 10), max: p.total, axisLabel: { color: muted }, splitLine: { lineStyle: { color: grid } } },
       series,
     });
