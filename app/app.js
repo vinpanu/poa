@@ -10,6 +10,9 @@
 // out ends this session alone, and 30 minutes without use signs out.
 // Second sign-in step (POABUILD-49): once Vince has set up an authenticator (the page at #/security), signing in asks
 // for its code, and the connector refuses a session without it (connector version 14, migration 029).
+// Password change (card POABUILD-122, connector version 23, migration 076): the same page changes his password, only from
+// a sign-in with both steps. The connector first allows one change (it receives no password), then the new password goes
+// to the sign-in service alone, then every other sign-in ends.
 // Home base (Build Package M3-PK004, tasks P3 and P4; Jira REQ-WEB, 2026-11-16): the home page opens on Today, then This
 // week, then Reports and History (REQ-WEB-001); a bar at the bottom of every page leads to Home, Reports and History
 // (REQ-WEB-008); History opens any day as Today shows it (REQ-WEB-007); Reports puts nutrition first (REQ-WEB-013) and
@@ -436,9 +439,13 @@ function showCode(text) {
   $("code-input").focus();
 }
 
-async function securityPage(body) {
+async function securityPage(page) {
   const { data, error } = await client.auth.mfa.listFactors();
   if (error) throw new Error("Couldn't check your sign-in steps: " + error.message);
+  const body = h("div", {});
+  const pwBox = h("div", {});
+  page.append(h("h2", {}, "Second sign-in step"), body, pwBox);
+  await passwordBox(pwBox, (data.totp || []).length > 0);
   if ((data.totp || []).length) {
     body.append(h("p", {}, "On. POA asks for the 6-digit code from your authenticator app each time you sign in, here and when you connect Claude."));
     return;
@@ -483,7 +490,76 @@ async function securityPage(body) {
     });
   });
 }
-const SECURITY = { path: "security", title: "Second sign-in step", render: securityPage };
+
+// The password box (card POABUILD-122). The new password goes only to the sign-in service (updateUser): never to the
+// connector, which only allows the change for this two-step session, and never to a log or the console. Both fields are
+// emptied as soon as it is sent, whatever the answer.
+const PASSWORD_MIN = 12;
+async function passwordBox(box, stepOn) {
+  box.append(h("h2", {}, "Password"));
+  if (!stepOn) {
+    box.append(h("p", {}, "Changing your password needs the second sign-in step: set it up above first."));
+    return;
+  }
+  let level = null;
+  try {
+    const { data, error } = await client.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (!error && data) level = data.currentLevel;
+  } catch { /* unknown: treated as one step */ }
+  if (level !== "aal2") {
+    box.append(h("p", {}, "To change your password, sign in with the code from your authenticator app first: sign out, then sign in with your password and the code."));
+    return;
+  }
+  const pw1 = h("input", { id: "new-password", type: "password", autocomplete: "new-password", minlength: String(PASSWORD_MIN), required: true });
+  const pw2 = h("input", { id: "new-password-2", type: "password", autocomplete: "new-password", minlength: String(PASSWORD_MIN), required: true });
+  const go = h("button", { class: "primary", type: "submit" }, "Change password");
+  const form = h("form", { id: "password-form", novalidate: true },
+    h("label", { for: "new-password" }, "New password, at least " + PASSWORD_MIN + " characters"), pw1,
+    h("label", { for: "new-password-2" }, "The same password again"), pw2, go);
+  box.append(h("p", { class: "muted" }, "Every other sign-in ends when it changes, Claude's included."), form);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const a = pw1.value, b = pw2.value;
+    if (a.length < PASSWORD_MIN) return say("Use at least " + PASSWORD_MIN + " characters.", true);
+    if (a !== b) return say("The two passwords don't match. Type the same one twice.", true);
+    pw1.value = ""; pw2.value = "";
+    go.disabled = true;
+    say("Changing...");
+    let changed = false;   // once the sign-in service has taken it, every message says so
+    try {
+      const { data } = await client.auth.getSession();
+      const token = data && data.session && data.session.access_token;
+      if (!token) { showSignIn(); return; }
+      const res = await fetch(CONNECTOR + "/allow-password-change", { method: "POST", headers: { Authorization: "Bearer " + token } });
+      let out = null;
+      try { out = await res.json(); } catch { /* no answer */ }
+      if (!res.ok || !out || out.status !== "allowed") {
+        return say("POA couldn't allow the change (" + ((out && out.reason) || res.status) + "). Nothing was changed: sign out, sign in with your password and the code, and try again.", true);
+      }
+      const { error } = await client.auth.updateUser({ password: a });
+      if (error) return say("The sign-in service didn't change it (" + error.message + "). Your password is as it was.", true);
+      changed = true;
+      const { error: e2 } = await client.auth.signOut({ scope: "others" });
+      box.textContent = "";
+      box.append(h("h2", {}, "Password"));
+      if (e2) {
+        box.append(h("p", {}, "Your password is changed, but ending your other sign-ins didn't work (" + e2.message + "). Reconnect POA in the Claude app (Disconnect, then Connect) when you next use it."));
+      } else {
+        box.append(h("p", {}, "Your password is changed. Every other sign-in has ended: reconnect POA in the Claude app (Disconnect, then Connect) when you next use it."));
+      }
+      say("");
+    } catch {
+      if (changed) {
+        say("Your password is changed, but POA couldn't finish: reconnect POA in the Claude app (Disconnect, then Connect) when you next use it.", true);
+      } else {
+        say("POA didn't answer. Nothing was changed: try again in a moment.", true);
+      }
+    } finally {
+      go.disabled = false;
+    }
+  });
+}
+const SECURITY = { path: "security", title: "Security", render: securityPage };
 
 // ------------------------------------------------------------------ routing and sign-in
 
