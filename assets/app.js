@@ -943,8 +943,9 @@
   }
 
   // ---------- pages ----------
-  // The Status page (2026-11-25 redesign): about three phone screens. The date line; the status card and
-  // Needs you; the active missions; the warnings and the way from idea to real use; Done, now and next and
+  // The Status page (2026-11-25 redesign): about three phone screens. The date line; Needs you first, full
+  // width, on every screen (Vince's placement of 2026-11-23; Project Director, 2026-11-27); the status card;
+  // the active missions; the warnings and the way from idea to real use; Done, now and next and
   // the workstreams. Every list shows its top three with the rest one tap away. The headline, the number
   // tiles, the rings and the two charts left this page; the decisions chart stays on the Decisions page.
   const HOME_TOP = 3, GLANCE_AHEAD = 28;
@@ -1039,7 +1040,8 @@
     const missions = typeof missionsCard === 'function' ? missionsCard() : '';
     return `<div class="wrap home">
       <div class="dateline rise"><h1>Project status · ${esc(fmt(new Date(), { weekday: 'long', month: 'long', day: 'numeric' }))}</h1><span class="upd">${esc(updatedAgo())}</span></div>
-      <div class="hcols">${statusCard()}${pendingCard()}</div>
+      ${pendingCard()}
+      ${statusCard()}
       ${missions}
       <div class="hcols">${awarenessCard()}${pipelineCard()}</div>
       <div class="hcols">${glanceCard()}${workstreamsCard()}</div>
