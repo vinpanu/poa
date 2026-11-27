@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-Mt9E3WomIn0Wh0SN2BK/O71hLl7ARII53FFHMELZ/q4='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'sha256-B2SEKgGwcTxz2DimVvgPf6bM0ZBXlb0ssUEWA/QfYPQ='; style-src 'unsafe-inline'; connect-src https://djkomeqozlulwepehoej.supabase.co; form-action 'none'; base-uri 'none'">
 <title>POA sign-in</title>
 <!-- POA connector sign-in page (Build Package M3-PK001, task T08; Registry decision D-0095).
      Supabase Auth's OAuth server sends the browser here with an authorization_id when Claude connects
@@ -114,9 +114,15 @@ async function finish(url) {
   goBack(url);
 }
 
+// POA's own words when a sign-in request can't be used (card POABUILD-49, CR1-D027): the sign-in service answers the
+// same way whether the request was already used by someone else (S49-10), used before, or has expired, and the
+// right step is the same for each, so the page doesn't try to tell them apart.
+const NOT_RECORDED = "POA couldn't record your second step for this connection. Start again from Claude's Connect button, and sign in here only right after pressing it.";
+const CANT_USE = "This sign-in request can't be used. Start again from Claude's Connect button, and sign in here only right after pressing it.";
+
 async function showConsent() {
   const { data, error } = await client.auth.oauth.getAuthorizationDetails(authorizationId);
-  if (error || !data) return say((error && error.message) || "This sign-in request has expired. Start again from Claude.", true);
+  if (error || !data) return say(secondStepDone ? NOT_RECORDED : CANT_USE, true);
   if (!("authorization_id" in data)) return finish(data.redirect_url); // allowed before: the details call allowed it
   $("client-name").textContent = (data.client && data.client.name) || "An app";
   $("signin").hidden = true;
@@ -143,7 +149,7 @@ async function vouch(code) {
     answer = null;
   }
   if (answer && answer.status === "trusted") return true;
-  say("POA couldn't record your second step for this connection. Start again from Claude's Connect button, and sign in here only right after pressing it.", true);
+  say(NOT_RECORDED, true);
   return false;
 }
 
@@ -156,6 +162,8 @@ async function decide(allow) {
     : await client.auth.oauth.denyAuthorization(authorizationId, { skipBrowserRedirect: true });
   if (error || !data || !data.redirect_url) {
     $("approve").disabled = $("deny").disabled = false;
+    // the request used elsewhere between showing Allow and pressing it answers here: with both steps, POA's words
+    if (allow && secondStepDone) return say(NOT_RECORDED, true);
     return say((error && error.message) || "That didn't work. Start again from Claude.", true);
   }
   if (allow) return finish(data.redirect_url);
