@@ -1389,7 +1389,8 @@
     return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[,;:]$/, '') + '…';
   };
   // The missions with what the site works out for each: its groups, status (the worst of them), counts by state,
-  // numbers, milestone and plan rows.
+  // numbers, milestone and plan rows. A mission none of whose Schedule groups is in the schedule doesn't show at
+  // all: no page, no Active missions row and no menu entry (the Missions tab's rules, 2026-11-27).
   function missions() {
     const all = areas(), sched = schedule(), seen = new Set();
     const b = board(), r = reqs();
@@ -1397,7 +1398,6 @@
       if (!raw || !raw.name) return null;
       const key = missionKey(raw.key || raw.name);
       if (!key || seen.has(key)) return null;
-      seen.add(key);
       const names = (Array.isArray(raw.groups) ? raw.groups : String(raw.groups || '').split(';')).map(x => String(x).trim()).filter(Boolean);
       // A name matches its group exactly, else by area name ("Shared foundation"), else as the start of one ("Mission 1B").
       const groups = [];
@@ -1408,6 +1408,8 @@
         if (!hit.length) hit = all.filter(a => a.name.toLowerCase().startsWith(l));
         hit.forEach(a => { if (!groups.includes(a)) groups.push(a); });
       });
+      if (!groups.length) return null;
+      seen.add(key);
       const keys = new Set(groups.map(g => areaKey(g.name)));
       const sev = s => SEVERITY[s] || 0;
       const s = groups.length ? groups.reduce((m, g) => sev(g.s) > sev(m) ? g.s : m, 'done') : null;
@@ -1484,7 +1486,6 @@
       : m.handWritten ? 'Hand-written parts not dated · <span class="mis-stale">may be out of date</span>' : '';
     const stands = `<div class="card rise mis-card"><div class="mis-h"><h3>Where it stands</h3>${m.s ? chip(m.s) : ''}</div>
       ${m.stands ? `<p class="mis-line">${esc(m.stands)}</p>` : ''}${tgt ? `<p class="mis-tgt">${esc(tgt)}</p>` : ''}
-      ${!m.groups.length ? '<p class="empty">None of this mission’s schedule groups are in the schedule.</p>' : ''}
       ${facts.length ? `<div class="mis-facts">${facts.map(f => `<div class="mis-fact"><b>${esc(f[0])}</b><span>${esc(f[1])}</span></div>`).join('')}</div>` : ''}
       ${green ? '<p class="mis-green">&#10003; Green. Nothing to fix.</p>' : ''}</div>`;
     // Path to green: the hand-kept steps, lettered; with none, the reasons the schedule gives, so it is never empty.
