@@ -198,11 +198,11 @@
   // What the Project Director wants Vince to know without asking him anything (Vince, 2026-11-23), one
   // line each, from the Registry's Awareness tab. The Status page shows only the warnings; the full list
   // shows every line from the last three days in Eastern time, today included, newest first, grouped by
-  // day. A red the feed sends without a closed date is still open: it stays at the top whatever its age
-  // (2026-11-25). Older lines stay in the Registry and simply stop showing. The page cuts the list, not the
-  // feed, so a line leaves on time even when the data was built an hour earlier. Until the feed reads the
-  // tab, the lines can come from the content document instead: bullets under "Awareness" > "Lines", each
-  // "When: Item"; those have no closed mark, so a red rolls off with the rest. Nothing is cut: a line
+  // day. A line whose level reads Red stays at the top whatever its age, and stops showing as red once its
+  // level no longer reads Red: the Project Director ends a red by changing its level and adding a line
+  // (2026-11-27). The feed sends every red row whatever its age. Older lines stay in the Registry and
+  // simply stop showing. The page cuts the list, not the feed, so a line leaves on time
+  // even when the data was built an hour earlier. Nothing is cut: a line
   // shows its first sentence and opens on a tap for the rest.
   const ET = 'America/New_York', AWARE_DAYS = 3;
   const ID_RE = /\b(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9]{0,7}-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6})?\b/g;
@@ -263,7 +263,7 @@
   function awareness(now = new Date()) {
     const a = S.feed.awareness;
     let raw = null, fromFeed = false;
-    if (a && a.status === 'ok') { fromFeed = true; raw = (a.lines || []).map(l => ({ when: l.when, item: l.item, level: l.level, closed: l.closed, mission: l.mission })); }
+    if (a && a.status === 'ok') { fromFeed = true; raw = (a.lines || []).map(l => ({ when: l.when, item: l.item, level: l.level, mission: l.mission })); }
     else {
       const sec = content('awareness').find(s => s.title.toLowerCase() === 'lines');
       if (sec) raw = sec.items.map(it => {
@@ -280,7 +280,7 @@
       if (!at || !item) return null;
       const day = etDay(at);
       return { at, day, time: etTime(at), item, level, mission: l.mission || '', age: Math.max(0, dayGap(today, day)),
-        open: fromFeed && level === 'red' && !String(l.closed == null ? '' : l.closed).trim() };
+        open: fromFeed && level === 'red' };
     }).filter(Boolean).sort((p, q) => q.at - p.at);
     return { ready: true, today, open: all.filter(l => l.open), lines: all.filter(l => !l.open && l.day >= first) };
   }
@@ -311,7 +311,7 @@
     const all = `All ${total} ${total === 1 ? 'line' : 'lines'}&nbsp;&rsaquo;`;
     if (!A.ready || !warns.length) return `<a class="card slim rise" id="sec-awareness" href="#awareness"><span><b>For your awareness</b><small>${!A.ready ? 'Not connected yet' : 'No warnings in the last three days'}</small></span><span class="go">${A.ready ? all : 'Open&nbsp;&rsaquo;'}</span></a>`;
     return `<div class="card rise" id="sec-awareness"><div class="card-h"><h3>For your awareness</h3><a class="go-link" href="#awareness">${all}</a></div>
-      <div class="sub">${A.open.length ? 'A red stays until it is closed. ' : ''}Warnings from the last three days, newest first.</div>${warns.slice(0, top).map(l => awareLine(l, A.today, true)).join('')}
+      <div class="sub">${A.open.length ? 'A red stays until it’s resolved. ' : ''}Warnings from the last three days, newest first.</div>${warns.slice(0, top).map(l => awareLine(l, A.today, true)).join('')}
       ${warns.length > top ? `<details class="fold"><summary>See all ${warns.length} warnings</summary>${warns.slice(top).map(l => awareLine(l, A.today, true)).join('')}</details>` : ''}</div>`;
   }
   function pageAwareness(now) {
@@ -321,7 +321,7 @@
     const chips = A.ready ? `<div class="aw-filters" role="group" aria-label="Show">${[['all', 'All ' + (A.lines.length + A.open.length)], ['warn', 'Warnings ' + warn]]
       .map(([k, t], i) => `<button type="button" data-aw="${k}" aria-pressed="${i === 0}">${esc(t)}</button>`).join('')}</div>` : '';
     const body = !A.ready ? `<div class="card rise"><p class="empty">${AWARE_OFF}</p></div>`
-      : `${A.open.length ? `<div class="card rise"><h3>Still open</h3><div class="sub">A red stays here until it is closed.</div>${A.open.map(l => awareLine(l, A.today, true)).join('')}</div>` : ''}
+      : `${A.open.length ? `<div class="card rise"><h3>Still open</h3><div class="sub">A red stays here until it’s resolved.</div>${A.open.map(l => awareLine(l, A.today, true)).join('')}</div>` : ''}
         <div class="card rise" id="awList">${awareDays(A, false)}</div>`;
     return head(crumb('awareness', 'For your awareness'), 'For your awareness', lead) + `<div class="wrap aware-page">${chips}${body}<p class="sub"><a href="#home">&lsaquo; Back to Status</a></p></div>`;
   }
@@ -344,8 +344,7 @@
   // Every action waiting on Vince, in the Project Director's order, each with what it waits on (Vince,
   // 2026-11-23: "I need to be able to go on the website to see what's up next"). Kept by the Project
   // Director only, in the Registry's Pending actions tab (Order | Action | How long | State | Waits on).
-  // Until the feed reads the tab, the lines are bullets under "pending" > "Lines" in the content document,
-  // each "Order: Action | How long | State | Waits on". Ready actions come first and stand out, then the
+  // Ready actions come first and stand out, then the
   // ones that wait, each in order. The Status page shows the first three; the rest are one tap away
   // (2026-11-25). The feed may also send a short title, a due text and a mission; without a title, the
   // title is the action's first sentence. Nothing is cut: the whole action opens on a tap.
@@ -969,8 +968,12 @@
       release = `<div class="kv"><span class="k">Next release</span><span class="v">${esc(name.charAt(0).toUpperCase() + name.slice(1))}${rel.startD ? ' &middot; ' + esc(fmtD(rel.startD)) : ''}${cards.length
         ? `<small>${done} of ${cards.length} build cards done</small><span class="hbar"><i style="width:${(done / cards.length * 100).toFixed(1)}%"></i></span>` : ''}</span></div>`;
     }
+    // The audit questions this week against Vince's own weekly minimum (2026-11-01; kept on this page by the
+    // Documents Director and the Project Director, 2026-11-25), only once the live count has a full week.
+    const wk = coachingWeek();
+    const week = wk ? `<div class="kv"><span class="k">Audit questions</span><span class="v">${esc(wk.done)} of ${esc(wk.min)} this week<small>Your weekly minimum is ${esc(wk.min)} &middot; <a href="#roadmap">Pace</a></small><span class="hbar"><i style="width:${Math.min(100, wk.done / wk.min * 100).toFixed(1)}%"></i></span></span></div>` : '';
     const counts = list.length ? `<div class="st3">${st('behind', 'behind', '--rose')}${st('risk', 'at risk', '--orange')}${st('track', 'on track', '--green')}</div>` : '';
-    return counts || launch || release ? `<div class="card rise" id="sec-status">${counts}${launch}${release}</div>` : '';
+    return counts || launch || release || week ? `<div class="card rise" id="sec-status">${counts}${launch}${week}${release}</div>` : '';
   }
   // From idea to real use: one row per step with its numbers; a step without numbers is left out.
   function pipelineCard() {
