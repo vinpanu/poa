@@ -171,7 +171,6 @@
   // or increment in delivery order. Retired rows are left out. Agreed start and finish are the dates the Project
   // Director last agreed (first set 2026-11-13); status is measured against them, so a moved forecast can't hide a slip.
   const SCHED_COLOR = { '0': '--steel', '1A': '--violet', '1B': '--purple', '2': '--green', '3': '--sky', '4': '--orange', all: '--teal' };
-  const SCHED_LEGEND = [['0', 'Planning and scope'], ['1A', 'Reasoning engine (1A)'], ['1B', 'Coaching knowledge (1B)'], ['2', 'Athlete model'], ['3', 'Data capture'], ['4', 'Daily running'], ['all', 'Releases']];
   const sColor = k => css(SCHED_COLOR[k] || '--teal');
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   const schedule = () => ((S.feed.schedule && S.feed.schedule.rows) || []).filter(r => !/retired/i.test(r.status))
@@ -183,8 +182,6 @@
     const today = startOfToday(), end = r.finishD && r.finishD > today ? r.finishD : today;
     return Math.max(0, Math.round((end - r.agreedFinishD) / DAY));
   };
-  const agreedTip = r => !r.done && r.agreedFinishD && (+r.agreedFinishD !== +r.finishD || (r.agreedStartD && +r.agreedStartD !== +r.startD))
-    ? `<br>Agreed ${r.agreedStartD && +r.agreedStartD !== +r.agreedFinishD ? fmt(r.agreedStartD) + ' to ' : ''}${fmtLong(r.agreedFinishD)}` : '';
   // Under its group's heading a stage drops a prefix the heading already says: "Food: build" reads "Build".
   const shortItem = (item, grp) => {
     const m = String(item).match(/^([^:]{1,40}):\s+(.+)$/);
@@ -583,6 +580,7 @@
       { href: '#pending', label: 'Your pending actions', sub: 'What needs you, and what each waits on', ico: '&#10148;', c: '--amber' },
       { href: '#awareness', label: 'For your awareness', sub: 'What’s new in the last three days', ico: '&#9673;', c: '--amber' },
       { href: '#roadmap', label: 'Schedule and milestones', sub: 'Every stage from June to launch', ico: '&#9719;', c: '--sky' },
+      { href: '#history', label: 'History', sub: 'The project month by month', ico: '&#8634;', c: '--steel' },
       { href: '#decisions', label: 'Decisions', sub: 'Every decision, by month', ico: '&#9878;', c: '--violet' },
       { href: '#trends', label: 'Progress trends', sub: 'Coverage over time', ico: '&#9650;', c: '--green' },
       { href: '#health', label: 'Data health', sub: 'When each source last refreshed', ico: '&#9881;', c: '--orange' },
@@ -786,36 +784,91 @@
     });
   }
 
-  // The whole schedule, a line per stage under its group's heading.
-  function scheduleChart(el, compact) {
-    const rows = schedule();
-    if (!rows.some(r => r.startD)) { el.style.height = '320px'; return gantt(el, compact); }
-    const ms = new Map(milestones().map(m => [m.id, m]));
-    const cats = [], bars = [], marks = [];
-    let group = null;
-    rows.forEach(r => {
-      if (r.group !== group) { group = r.group; cats.push({ label: r.group, head: true }); }
-      cats.push({ label: shortItem(r.item, r.group), head: false });
-      const y = cats.length - 1, color = sColor(r.mission), st = rowState(r), late = st.s === 'behind', risk = st.s === 'risk';
-      const stateTip = late ? '<br><b>Behind schedule</b>' : risk ? '<br><b>At risk:</b> ' + esc(st.why.map(t => t.replace(/^[^:]*:\s*/, '')).join('; ')) : '';
-      const m = r.milestone && ms.get(r.milestone), tgt = m && m.targetD;
-      const tgtTip = tgt ? '<br>Target ' + fmtLong(tgt) : '';
+  // The Schedule page's chart, drawn in plain HTML and CSS so it fits a phone (2026-11-25). "12 weeks" (the
+  // default at every width) is 28 days before today to 56 after, with a line for each area not finished that
+  // has work in that window; "Whole program" is every area from the first start to the last finish. One bar
+  // per stage: done steel, under way in its state's colour, planned a dashed outline (orange or rose when it
+  // is at risk or behind). Milestones are diamonds: solid at the forecast (both ends of a window), hollow at the
+  // target. Every bar and diamond is a button whose name, dates and state show in the line under the chart.
+  const SCHED_BACK = 28, SCHED_AHEAD = 56;
+  const schedItems = (a, ms) => {
+    const out = [];
+    a.rows.forEach(r => {
+      const name = shortItem(r.item, a.name), st = rowState(r).s, word = STATUS_LABEL[st].toLowerCase();
       if (r.milestone) {
-        if (r.done && r.finishD) marks.push({ y, date: r.finishD, kind: 'f', color, tip: `${esc(r.item)}<br>Done ${fmtLong(r.finishD)}${tgtTip}` });
-        else if (r.startD) {
-          const span = r.finishD && r.finishD - r.startD > DAY;
-          const tip = `${esc(r.item)}<br>Forecast ${span ? fmt(r.startD) + ' to ' + fmtLong(r.finishD) : fmtLong(r.startD)}${agreedTip(r)}${tgtTip}${stateTip}`;
-          if (span) bars.push({ y, start: r.startD, end: r.finishD, color, thin: true, late, risk, tip });
-          marks.push({ y, date: r.startD, kind: 'f', color, tip });
-          if (span) marks.push({ y, date: r.finishD, kind: 'f', color, tip });
-        }
-        if (tgt && !(r.done && r.finishD && Math.abs(tgt - r.finishD) <= DAY)) marks.push({ y, date: tgt, kind: 't', tip: `${esc(r.item)}<br>Target ${fmtLong(tgt)}` });
+        const m = ms.get(r.milestone), tgt = m && m.targetD;
+        const span = r.startD && r.finishD && r.finishD - r.startD > DAY;
+        const when = r.done ? 'done' + (r.finishD ? ' ' + fmtD(r.finishD) : '') : r.startD ? 'forecast ' + (span ? fmt(r.startD) + ' to ' + fmtD(r.finishD) : fmtD(r.startD)) : 'no forecast yet';
+        const tip = `${a.name}: ${name}, ${when}${tgt ? ', target ' + fmtD(tgt) : ''}${r.done ? '' : ', ' + word}`;
+        if (r.done && r.finishD) out.push({ at: r.finishD, cls: 'f done', tip });
+        else if (!r.done && r.startD) { out.push({ at: r.startD, cls: 'f ' + st, tip }); if (span) out.push({ at: r.finishD, cls: 'f ' + st, tip }); }
+        if (tgt && !(r.done && r.finishD && Math.abs(tgt - r.finishD) <= DAY)) out.push({ at: tgt, cls: 't', tip });
       } else if (r.startD && r.finishD) {
-        bars.push({ y, start: r.startD, end: new Date(+r.finishD + DAY), color, done: r.done, late, risk,
-          tip: `${esc(r.item)}<br>${fmt(r.startD)} to ${fmtLong(r.finishD)} · ${esc([r.stage, r.status].filter(Boolean).join(', '))}${agreedTip(r)}${stateTip}` });
+        const k = r.done ? 'done' : /in progress/i.test(r.status) ? 'now' : 'plan';
+        const label = k === 'done' ? 'done' : k === 'now' ? word : st === 'track' ? 'planned' : 'planned, ' + word;
+        out.push({ from: r.startD, to: new Date(+r.finishD + DAY), cls: k === 'done' ? 'done' : k + ' ' + st, tip: `${a.name}: ${name}, ${fmt(r.startD)} to ${fmtD(r.finishD)}${agreedSlip(r) ? ' (agreed ' + fmtD(r.agreedFinishD) + ')' : ''}, ${label}` });
       }
     });
-    drawGantt(el, cats, bars, marks, compact, true);
+    return out;
+  };
+  function schedGantt(win) {
+    const today = startOfToday(), ms = new Map(milestones().map(m => [m.id, m]));
+    const finished = a => a.s === 'done' || a.s === 'moved';
+    const worst = (x, y) => SEVERITY[y.a.s] - SEVERITY[x.a.s];
+    const all = areas().map(a => ({ a, xs: schedItems(a, ms) })).filter(g => g.xs.length);
+    const inside = (x, f, t) => x.from ? x.to > f && x.from <= t : x.at >= f && x.at <= t;
+    let from, to, list;
+    if (win === 'all') {
+      list = all.filter(g => finished(g.a)).concat(all.filter(g => !finished(g.a)).sort(worst));
+      const times = all.flatMap(g => g.xs.flatMap(x => x.from ? [+x.from, +x.to] : [+x.at]));
+      if (!times.length) return '<p class="empty">No dated stages yet.</p>';
+      const lo = Math.min(...times, +today), hi = Math.max(...times, +today), pad = (hi - lo) * 0.015;
+      from = new Date(lo - pad); to = new Date(hi + pad);
+    } else {
+      from = new Date(+today - SCHED_BACK * DAY); to = new Date(+today + SCHED_AHEAD * DAY);
+      list = all.filter(g => !finished(g.a) && g.xs.some(x => inside(x, from, to))).sort(worst);
+    }
+    if (!list.length) return '<p class="empty">No area has work in these 12 weeks.</p>';
+    const pct = d => (d - from) / (to - from) * 100, now = pct(today);
+    const ticks = [];
+    if (win === 'all') {
+      const months = [];
+      for (let m = new Date(from.getFullYear(), from.getMonth() + 1, 1); m <= to; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) months.push(m);
+      // Every month on a wide screen; on a phone every other one (the "alt" ones hide). The first label of each
+      // year a phone shows, and each January, carry the year: "Jun ’26 … Dec, Jan ’27, Feb ’27 …".
+      const alt = months.length > 8;
+      let year = null;
+      months.forEach((m, i) => {
+        const shown = !alt || i % 2 === 0, y = m.getFullYear();
+        const withYear = m.getMonth() === 0 || (shown && y !== year);
+        if (shown) year = y;
+        ticks.push({ at: pct(m), label: fmt(m, { month: 'short' }) + (withYear ? ' ’' + String(y).slice(2) : ''), edge: alt && !shown ? 'alt' : '' });
+      });
+    } else for (let n = -SCHED_BACK; n <= SCHED_AHEAD; n += 14) ticks.push({ at: pct(new Date(+today + n * DAY)), label: n && n % 28 === 0 ? fmt(new Date(+today + n * DAY)) : '', edge: n === -SCHED_BACK ? 'first' : n === SCHED_AHEAD ? 'last' : '' });
+    // Labels keep clear of the Today label: about 40px either side of it.
+    const clear = window.innerWidth < 700 ? 16 : 6;
+    ticks.forEach(t => { if (Math.abs(t.at - now) < clear) t.label = ''; });
+    const at = p => `left:${p.toFixed(2)}%`;
+    const head = ticks.filter(t => t.label).map(t => `<span class="${t.edge}" style="${at(t.at)}">${esc(t.label)}</span>`).join('') + `<span class="today" style="${at(now)}">Today</span>`;
+    const grid = ticks.map(t => `<i style="${at(t.at)}"></i>`).join('') + `<i class="today" style="${at(now)}"></i>`;
+    const btn = (cls, style, tip) => `<button type="button" class="${cls}" style="${style}" data-tip="${esc(tip)}" aria-label="${esc(tip)}"></button>`;
+    const rows = list.map(g => {
+      const xs = g.xs.filter(x => inside(x, from, to));
+      const bars = xs.filter(x => x.from).map(x => { const l = Math.max(0, pct(x.from)), r = Math.min(100, pct(x.to)); return btn('g-bar ' + x.cls, `${at(l)};width:${Math.max(1.6, r - l).toFixed(2)}%`, x.tip); });
+      // Targets first, so a forecast diamond on the same day sits on top.
+      const marks = xs.filter(x => !x.from).sort((p, q) => (p.cls === 't' ? 0 : 1) - (q.cls === 't' ? 0 : 1)).map(x => btn('g-ms ' + x.cls, at(pct(x.at)), x.tip));
+      return `<div class="g-row"><div class="g-name">${esc(g.a.name)}</div><div class="g-track">${bars.join('')}${marks.join('')}</div></div>`;
+    }).join('');
+    return `<div class="sgantt"><div class="g-head"><span></span><div class="g-ticks">${head}</div></div><div class="g-body"><div class="g-grid">${grid}</div>${rows}</div></div>
+      <p class="g-tip" id="gtip" aria-live="polite">Tap a bar for its stage and dates.</p>
+      <div class="sched-legend"><span><i style="background:var(--steel)"></i>Done</span><span><i style="background:var(--green)"></i>On track</span><span><i style="background:var(--orange)"></i>At risk</span><span><i style="background:var(--rose)"></i>Behind</span><span><i class="pl"></i>Planned</span><span>&#9670; milestone forecast or done &middot; &#9671; target</span></div>`;
+  }
+  // The chart card's inside: the switch, then the chart for the chosen window.
+  function schedCardBody() {
+    const all = S.schedWin === 'all';
+    return `<div class="sched-h"><h3>${all ? 'The whole program' : 'The 12 weeks around today'}</h3>
+      <span class="seg" role="group" aria-label="Chart range"><button type="button" data-win="12" aria-pressed="${!all}">12 weeks</button><button type="button" data-win="all" aria-pressed="${all}">Whole program</button></span></div>
+      <div class="sub">${all ? 'Every area from the first stage to the last.' : 'Only the areas with work in this window. One line per area, one bar per stage.'}</div>${schedGantt(S.schedWin)}`;
   }
 
   // One bar per group for the Status page, from its first start to its last finish, with the launch window.
@@ -848,7 +901,6 @@
     }
     drawGantt(el, groups, bars, marks, compact, false);
   }
-  const schedLegend = () => `<div class="sched-legend">${SCHED_LEGEND.map(([k, t]) => `<span><i style="background:${sColor(k)}"></i>${esc(t)}</span>`).join('')}<span><i class="pl"></i>Planned</span><span><i class="risk"></i>At risk</span><span><i class="late"></i>Behind</span><span>&#9670; forecast or actual &middot; &#9671; target</span></div>`;
 
   function decisionsByMonth() {
     const counts = new Map();
@@ -1098,8 +1150,10 @@
     const t = ms.get(r.milestone).targetD;
     if (r.done) return `${shortItem(r.item, a.name)}: done ${fmtD(r.finishD)}, target ${fmtD(t)}`;
     if (!r.startD) return `${shortItem(r.item, a.name)}: target ${fmtD(t)}, no forecast yet`;
-    const to = r.finishD || r.startD;
-    return `${shortItem(r.item, a.name)}: target ${fmtD(t)} · forecast ${fmtD(r.startD)}${+to !== +r.startD ? ' to ' + fmtD(to) : ''} · ${slip(t, r.startD, to)}`;
+    const to = r.finishD || r.startD, late = slip(t, r.startD, to);
+    // On track against the agreed dates, though the forecast is past the original target.
+    if (a.s === 'track' && Math.round((to - t) / DAY) > 0) return 'On track to the agreed dates · ' + late;
+    return `${shortItem(r.item, a.name)}: target ${fmtD(t)} · forecast ${fmtD(r.startD)}${+to !== +r.startD ? ' to ' + fmtD(to) : ''} · ${late}`;
   }
   // One area: its state, where it is and what's next; tapped open, its reasons, stages and Jira cards.
   function areaRow(a) {
@@ -1167,12 +1221,20 @@
     const r = reqs();
     if (!r || !(r.areas || []).length) return '';
     const due = name => { const row = schedule().find(x => /^requirements$/i.test(x.stage) && areaKey(x.group) === areaKey(name)); return row && !row.done && row.finishD ? row : null; };
-    return `<div class="card rise"><h3>Requirements before build</h3><div class="sub">Approved requirements out of each area’s total. Building waits on them.</div>
-      <div class="rel-list">${r.areas.map(a => {
-        const row = due(a.name), st = row ? rowState(row).s : null;
-        return `<div class="rel"><div class="area-top"><b>${esc(a.name.replace(/\s+requirements$/i, ''))}</b>${st ? chip(st) : ''}</div>
+    const item = a => {
+      const row = due(a.name), st = row ? rowState(row).s : null;
+      return `<div class="rel"><div class="area-top"><b>${esc(a.name.replace(/\s+requirements$/i, ''))}</b>${st ? chip(st) : ''}</div>
           ${row ? `<div class="sub">Due ${esc(fmtD(row.finishD))}</div>` : ''}${reqMeter(a)}</div>`;
-      }).join('')}</div></div>`;
+    };
+    // Every area fully approved: one line, the list folded. Otherwise the areas still open, the approved ones folded.
+    const full = a => (a.records || []).length > 0 && a.records.every(x => x.cat === 'done');
+    const open = r.areas.filter(a => !full(a)), approved = r.areas.filter(full);
+    const n = r.areas.length, total = r.areas.reduce((s, a) => s + (a.records || []).length, 0);
+    const fold = (label, list) => list.length ? `<details class="sched-fold"><summary>${esc(label)}</summary><div class="rel-list">${list.map(item).join('')}</div></details>` : '';
+    if (!open.length) return `<div class="card rise"><div class="area-top"><h3>Requirements before build</h3>${chip('done')}</div>
+      <p class="area-line">All ${n} areas approved: ${total} of ${total} requirements</p>${fold(`The ${n} areas`, approved)}</div>`;
+    return `<div class="card rise"><h3>Requirements before build</h3><div class="sub">Approved requirements out of each area’s total. Building waits on them.</div>
+      <div class="rel-list">${open.map(item).join('')}</div>${fold(`${approved.length} ${approved.length === 1 ? 'area' : 'areas'} fully approved`, approved)}</div>`;
   }
   function paceCard() {
     const p = pace(), wk = coachingWeek();
@@ -1203,11 +1265,11 @@
     }
     series[0].markLine = { symbol: 'none', silent: true, label: { formatter: 'Today', color: amber, fontWeight: 800, fontSize: 11 }, lineStyle: { color: amber, width: 2, type: 'solid' }, data: [{ xAxis: today }] };
     chart(el, {
-      grid: { left: 36, right: 14, top: 18, bottom: 46 },
+      grid: { left: 36, right: 34, top: 18, bottom: 46 },
       tooltip: { trigger: 'axis', valueFormatter: v => v == null ? '' : Math.round(v) },
       legend: { bottom: 0, textStyle: { color: muted, fontSize: 12 } },
       xAxis: { type: 'time', min: from, max: end, splitNumber: window.innerWidth < 560 ? 3 : 6,
-        axisLabel: { color: muted, fontSize: 11, hideOverlap: true, formatter: v => fmtD(new Date(v)) }, axisLine: { lineStyle: { color: grid } }, splitLine: { show: false } },
+        axisLabel: { color: muted, fontSize: 11, hideOverlap: true, alignMinLabel: 'left', alignMaxLabel: 'right', formatter: v => fmtD(new Date(v)) }, axisLine: { lineStyle: { color: grid } }, splitLine: { show: false } },
       yAxis: { type: 'value', min: Math.max(0, Math.floor((p.base - 5) / 10) * 10), max: p.total, axisLabel: { color: muted }, splitLine: { lineStyle: { color: grid } } },
       series,
     });
@@ -1215,17 +1277,22 @@
 
   function pageRoadmap() {
     const ms = milestones();
-    const up = ms.filter(m => !/complete/i.test(m.status)).sort((a, b) => (a.targetD || 9e15) - (b.targetD || 9e15));
+    // Ahead: the milestones with a date (a target, or else a forecast), soonest first; the rest are folded.
+    const msDate = m => m.targetD || parseDate(m.forecastEarliest);
+    const up = ms.filter(m => !/complete/i.test(m.status)).sort((a, b) => (msDate(a) || 9e15) - (msDate(b) || 9e15));
+    const upDated = up.filter(msDate), upUndated = up.filter(m => !msDate(m));
     const reached = ms.filter(m => /complete/i.test(m.status)).sort((a, b) => (b.actualD || b.targetD || 0) - (a.actualD || a.targetD || 0));
+    S.schedWin = '12';
     const late = m => m.actualD && m.targetD && m.actualD - m.targetD > DAY ? ` <span class="chip behind">${Math.round((m.actualD - m.targetD) / DAY)} days after target</span>` : '';
     const rows = schedule();
     const reviewed = parseDate(S.feed.schedule && S.feed.schedule.reviewed);
     const lead = rows.length ? 'Where each area is, what’s next and whether it’s on schedule, from the Registry’s schedule and the Jira build board' + (reviewed ? '. Forecast last reviewed ' + fmtLong(reviewed) : '') + '.'
       : 'Target windows are the sponsor’s planning dates, not forecasts.';
     const list = rows.length ? areas() : [];
-    // Areas still under way first, in delivery order; finished ones last.
+    // Areas still under way, worst first (behind, at risk, on track) and in delivery order within each;
+    // finished and moved ones folded below them.
     const finished = a => a.s === 'done' || a.s === 'moved';
-    const ordered = list.filter(a => !finished(a)).concat(list.filter(finished));
+    const live = list.filter(a => !finished(a)).sort((x, y) => SEVERITY[y.s] - SEVERITY[x.s]), fin = list.filter(finished);
     const b = S.feed.build, read = b && b.status === 'ok' ? parseDate(b.checked) : null;
     const soon = rows.length ? nextTwoWeeks() : [];
     const docLink = (S.feed.menus || []).some(m => (m.groups || []).some(g => (g.items || []).some(i => i.copy === 'jira-views')));
@@ -1238,21 +1305,40 @@
     };
     return head(crumb('roadmap', 'Schedule and milestones'), 'Schedule and milestones', lead) +
       `<div class="wrap">
-      ${list.length ? `<div class="card rise"><h3>Every area</h3><div class="sub">${esc(stateSummary(list))}. On track means every stage is on schedule against its agreed dates. Tap an area for its stages and build cards.</div>
-        <div class="areas">${ordered.map(areaRow).join('')}</div>${boardNote ? `<div class="sub" style="margin-top:10px">${boardNote}</div>` : ''}</div>
+      ${rows.some(r => r.startD) ? `<div class="card rise sched-card" id="schedCard">${schedCardBody()}</div>`
+        : `<div class="card rise"><h3>Schedule</h3><div class="sub">Sponsor target windows</div><div class="chart" id="sched" style="height:320px"></div></div>`}
+      ${list.length ? `<div class="card rise"><h3>Every area</h3><div class="sub">${esc(stateSummary(list))}. Worst first. On track means every stage is on schedule against its agreed dates. Tap an area for its stages and build cards.</div>
+        <div class="areas">${live.map(areaRow).join('')}</div>${fin.length ? `<details class="sched-fold"><summary>${fin.length} finished ${fin.length === 1 ? 'area' : 'areas'}</summary><div class="areas">${fin.map(areaRow).join('')}</div></details>` : ''}
+        ${boardNote ? `<div class="sub" style="margin-top:10px">${boardNote}</div>` : ''}</div>
       <div class="grid g-half">
         <div class="card rise"><h3>Next two weeks</h3><div class="sub">Stages starting or due by ${esc(fmtD(new Date(+startOfToday() + 14 * DAY)))}</div>${mini(soon.map(x => miniItem(rowState(x.r).s, `${esc(x.r.item)} <span class="sub">· ${esc(x.kind)}</span>`, fmtD(x.d))))}</div>
         ${paceCard()}
       </div>
       <div class="grid g-half">${releasesCard()}${requirementsCard()}</div>` : ''}
-      <div class="card rise"><h3>Schedule</h3><div class="sub">${rows.length ? 'Bars are stages, solid up to today and lighter after. Tap a bar for its dates.' : 'Sponsor target windows'}</div><div class="chart" id="sched"></div>${rows.length ? schedLegend() : ''}</div>
       <div class="grid g-half">
-        <div class="card rise"><h3>Milestones ahead</h3><ul class="done-list">${up.map(m => `<li><span class="d">${esc(m.targetD ? fmtD(m.targetD) : 'No date')}</span><span>${esc(m.title)}<br><span class="sub">${milestoneSub(m)}</span></span></li>`).join('')}</ul></div>
-        <div class="card rise"><h3>Milestones reached</h3><ul class="done-list">${reached.map(m => `<li><span class="d">${esc(fmtD(m.actualD || m.targetD))}</span><span class="t">${esc(m.title)}${late(m)}</span></li>`).join('')}</ul></div>
+        <div class="card rise"><h3>Milestones ahead</h3>${upDated.length ? `<ul class="done-list">${upDated.map(m => `<li><span class="d">${esc(fmtD(msDate(m)))}</span><span>${esc(m.title)}<br><span class="sub">${milestoneSub(m)}</span></span></li>`).join('')}</ul>` : '<p class="empty">No dated milestones ahead.</p>'}
+          ${upUndated.length ? `<details class="sched-fold"><summary>${upUndated.length} ${upUndated.length === 1 ? 'milestone' : 'milestones'} without a date yet</summary><ul class="done-list">${upUndated.map(m => `<li><span>${esc(m.title)}<br><span class="sub">${milestoneSub(m)}</span></span></li>`).join('')}</ul></details>` : ''}</div>
+        <div class="card rise"><h3>Milestones reached</h3><ul class="done-list">${reached.map(m => { const d = m.actualD || m.targetD;
+          return `<li>${d ? `<span class="d">${esc(fmtD(d))}</span>` : ''}<span class="t">${esc(String(m.title || '').replace(/\.\s*$/, ''))}${late(m)}</span></li>`; }).join('')}</ul></div>
       </div></div>`;
   }
   function afterRoadmap(root) {
-    scheduleChart($('#sched', root), window.innerWidth < 700);
+    const card = $('#schedCard', root);
+    if (card) {
+      const tip = b => {
+        card.querySelectorAll('.g-bar.on, .g-ms.on').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        $('#gtip', card).textContent = b.dataset.tip;
+      };
+      // The switch redraws only the chart card, and keeps focus on the button pressed.
+      card.addEventListener('click', ev => {
+        const w = ev.target.closest('[data-win]');
+        if (w) { S.schedWin = w.dataset.win; card.innerHTML = schedCardBody(); const f = $(`[data-win="${S.schedWin}"]`, card); if (f) f.focus(); return; }
+        const b = ev.target.closest('.g-bar, .g-ms');
+        if (b) tip(b);
+      });
+      card.addEventListener('mouseover', ev => { const b = ev.target.closest('.g-bar, .g-ms'); if (b) $('#gtip', card).textContent = b.dataset.tip; });
+    } else if ($('#sched', root)) gantt($('#sched', root), window.innerWidth < 700);
     drawPace($('#paceChart', root));
   }
 
@@ -1292,6 +1378,103 @@
     };
     draw('');
     $('#decSearch', root).addEventListener('input', e => draw(e.target.value.trim().toLowerCase()));
+  }
+
+  // ---------- history ----------
+  // The project month by month (the approved sample, 2026-11-25), from data the site already has: schedule
+  // stages finished (by their finish date), milestones reached (actual date, else target), decisions, and
+  // releases finished. Newest month first; a month shows its first eight entries and folds the rest, while a
+  // search or a filter shows every match. A finished Release row is listed once, as a Release, and counts
+  // among the stages finished. Build cards done count by the day their status last changed, leaving out the
+  // day the board was set up (cards started there at their real status), as "Done in the last 7 days" does.
+  const HIST_FOLD = 8;
+  const HIST_KIND = { stage: 'Finished', milestone: 'Milestone', decision: 'Decision', release: 'Release' };
+  const HIST_ORDER = { milestone: 0, release: 1, stage: 2, decision: 3 };
+  const HIST_FILTERS = [['all', 'All'], ['stage', 'Finished'], ['milestone', 'Milestones'], ['decision', 'Decisions'], ['release', 'Releases']];
+  const monthOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const dayOf = d => monthOf(d) + '-' + String(d.getDate()).padStart(2, '0');
+  const monthDate = k => new Date(+k.slice(0, 4), +k.slice(5, 7) - 1, 1);
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  let HIST = null;
+  // { items (newest first), counts per month, months (oldest first, through this month) }
+  function historyData() {
+    const items = [];
+    schedule().filter(r => r.done && !r.milestone && r.finishD).forEach(r => {
+      const rel = /^release$/i.test(r.stage);
+      items.push({ d: r.finishD, kind: rel ? 'release' : 'stage', text: rel ? r.item : r.group + ' · ' + shortItem(r.item, r.group), sub: '' });
+    });
+    milestones().filter(m => /complete/i.test(m.status) && (m.actualD || m.targetD))
+      .forEach(m => items.push({ d: m.actualD || m.targetD, kind: 'milestone', text: m.title, sub: '' }));
+    decisions().forEach(x => items.push({ d: x.dateD, kind: 'decision', text: x.headline, sub: x.id + ' · ' + (MISSION_NAME[x.mission || 'all'] || '') }));
+    items.sort((a, b) => b.d - a.d || HIST_ORDER[a.kind] - HIST_ORDER[b.kind]);
+    const counts = {};
+    const at = m => counts[m] || (counts[m] = { stage: 0, decision: 0, cards: 0 });
+    items.forEach(it => {
+      it.m = monthOf(it.d);
+      it.find = (it.text + ' ' + it.sub).toLowerCase();
+      const c = at(it.m);
+      if (it.kind === 'stage' || it.kind === 'release') c.stage++;
+      else if (it.kind === 'decision') c.decision++;
+    });
+    const b = board(), since = parseDate(S.feed.static && S.feed.static.buildBoardSince);
+    if (b) (b.areas || []).flatMap(a => a.cards || []).forEach(c => {
+      const d = parseDate(c.changed);
+      if (c.cat === 'done' && d && !(since && dayOf(d) <= dayOf(since))) at(monthOf(d)).cards++;
+    });
+    const keys = Object.keys(counts).concat(monthOf(new Date())).sort(), months = [];
+    for (let d = monthDate(keys[0]); monthOf(d) <= keys[keys.length - 1]; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) months.push(monthOf(d));
+    return { items, counts, months };
+  }
+  const histCounts = c => [plural(c.stage, 'stage finished', 'stages finished'), plural(c.decision, 'decision', 'decisions'),
+    c.cards ? plural(c.cards, 'build card done', 'build cards done') : ''].filter(Boolean).join(' · ');
+  const histLi = it => `<li><span class="d">${esc(fmt(it.d))}</span><span class="t">${esc(it.text)}${it.sub ? `<span class="hist-id">${esc(it.sub)}</span>` : ''}</span><span class="hist-kind ${it.kind}">${HIST_KIND[it.kind]}</span></li>`;
+  // The month cards for a search and a filter, as one string.
+  function histList(H, q, kind) {
+    const all = kind === 'all' && !q;
+    const f = H.items.filter(it => (kind === 'all' || it.kind === kind) && (!q || it.find.includes(q)));
+    if (!f.length) return `<div class="card"><p class="empty">${H.items.length ? 'Nothing matches.' : 'Nothing recorded yet.'}</p></div>`;
+    const groups = [];
+    f.forEach(it => { const g = groups[groups.length - 1]; if (g && g.m === it.m) g.items.push(it); else groups.push({ m: it.m, items: [it] }); });
+    return groups.map(g => {
+      const shown = all ? g.items.slice(0, HIST_FOLD) : g.items, rest = all ? g.items.slice(HIST_FOLD) : [];
+      return `<div class="card hist-month" id="hm-${g.m}"><h3>${esc(fmt(monthDate(g.m), { month: 'long', year: 'numeric' }))}</h3><div class="sub">${esc(histCounts(H.counts[g.m]))}</div>
+        <ul class="hist-lines">${shown.map(histLi).join('')}</ul>${rest.length ? `<details class="hist-more"><summary>See all ${g.items.length}</summary><ul class="hist-lines">${rest.map(histLi).join('')}</ul></details>` : ''}</div>`;
+    }).join('');
+  }
+  function pageHistory() {
+    const H = HIST = historyData();
+    const v = k => (H.counts[k] || {}).stage || 0, max = Math.max(1, ...H.months.map(v));
+    const bars = H.months.map(k => {
+      const d = monthDate(k), n = v(k), has = !!H.counts[k];
+      return `<button type="button" class="hist-bar" data-month="${k}"${has ? '' : ' disabled'} aria-label="${esc(fmt(d, { month: 'long', year: 'numeric' }))}: ${plural(n, 'stage', 'stages')} finished"><b>${n}</b><i style="height:${Math.max(3, n / max * 96).toFixed(0)}px"></i><span>${esc(fmt(d, { month: 'short' }))}</span></button>`;
+    }).join('');
+    return head(crumb('history', 'History'), 'History', 'The project month by month: what finished, what was decided and what shipped.') +
+      `<div class="wrap">
+        <div class="card rise"><h3>Stages finished each month</h3><div class="sub">Tap a month to jump to it</div><div class="hist-bars">${bars}</div></div>
+        <input class="search" id="histQ" type="search" placeholder="Search the history" aria-label="Search the history">
+        <div class="hist-filters" role="group" aria-label="Show">${HIST_FILTERS.map(([k, l]) => `<button type="button" data-kind="${k}" aria-pressed="${k === 'all'}">${l}</button>`).join('')}</div>
+        <div class="hist-list" id="histList">${histList(H, '', 'all')}</div></div>`;
+  }
+  // Typing or a filter redraws the list only, so the search box keeps its focus.
+  function afterHistory(root) {
+    const H = HIST, list = $('#histList', root), box = $('#histQ', root);
+    if (!H || !list) return;
+    let kind = 'all';
+    const draw = () => { list.innerHTML = histList(H, box.value.trim().toLowerCase(), kind); };
+    box.addEventListener('input', draw);
+    $('.hist-filters', root).addEventListener('click', ev => {
+      const b = ev.target.closest('[data-kind]');
+      if (!b) return;
+      kind = b.dataset.kind;
+      root.querySelectorAll('.hist-filters [data-kind]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      draw();
+    });
+    const bars = $('.hist-bars', root);
+    bars.scrollLeft = bars.scrollWidth;
+    bars.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-month]'), el = b && document.getElementById('hm-' + b.dataset.month);
+      if (el) el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    });
   }
 
   function pageTrends() {
@@ -1389,7 +1572,8 @@
     return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[,;:]$/, '') + '…';
   };
   // The missions with what the site works out for each: its groups, status (the worst of them), counts by state,
-  // numbers, milestone and plan rows.
+  // numbers, milestone and plan rows. A mission none of whose Schedule groups is in the schedule doesn't show at
+  // all: no page, no Active missions row and no menu entry (the Missions tab's rules, 2026-11-27).
   function missions() {
     const all = areas(), sched = schedule(), seen = new Set();
     const b = board(), r = reqs();
@@ -1397,7 +1581,6 @@
       if (!raw || !raw.name) return null;
       const key = missionKey(raw.key || raw.name);
       if (!key || seen.has(key)) return null;
-      seen.add(key);
       const names = (Array.isArray(raw.groups) ? raw.groups : String(raw.groups || '').split(';')).map(x => String(x).trim()).filter(Boolean);
       // A name matches its group exactly, else by area name ("Shared foundation"), else as the start of one ("Mission 1B").
       const groups = [];
@@ -1408,6 +1591,8 @@
         if (!hit.length) hit = all.filter(a => a.name.toLowerCase().startsWith(l));
         hit.forEach(a => { if (!groups.includes(a)) groups.push(a); });
       });
+      if (!groups.length) return null;
+      seen.add(key);
       const keys = new Set(groups.map(g => areaKey(g.name)));
       const sev = s => SEVERITY[s] || 0;
       const s = groups.length ? groups.reduce((m, g) => sev(g.s) > sev(m) ? g.s : m, 'done') : null;
@@ -1484,7 +1669,6 @@
       : m.handWritten ? 'Hand-written parts not dated · <span class="mis-stale">may be out of date</span>' : '';
     const stands = `<div class="card rise mis-card"><div class="mis-h"><h3>Where it stands</h3>${m.s ? chip(m.s) : ''}</div>
       ${m.stands ? `<p class="mis-line">${esc(m.stands)}</p>` : ''}${tgt ? `<p class="mis-tgt">${esc(tgt)}</p>` : ''}
-      ${!m.groups.length ? '<p class="empty">None of this mission’s schedule groups are in the schedule.</p>' : ''}
       ${facts.length ? `<div class="mis-facts">${facts.map(f => `<div class="mis-fact"><b>${esc(f[0])}</b><span>${esc(f[1])}</span></div>`).join('')}</div>` : ''}
       ${green ? '<p class="mis-green">&#10003; Green. Nothing to fix.</p>' : ''}</div>`;
     // Path to green: the hand-kept steps, lettered; with none, the reasons the schedule gives, so it is never empty.
@@ -1794,7 +1978,7 @@
 
   const ROUTES = {
     home: [pageHome, afterHome, 'Status'], awareness: [pageAwareness, afterAwareness, 'For your awareness'],
-    roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
+    roadmap: [pageRoadmap, afterRoadmap, 'Schedule'], history: [pageHistory, afterHistory, 'History'], decisions: [pageDecisions, afterDecisions, 'Decisions'],
     trends: [pageTrends, afterTrends, 'Progress trends'], health: [pageHealth, afterHealth, 'Data health'], goal: [pageGoal, null, 'The goal'],
     missions: [pageMissions, null, 'Missions'], lifecycle: [pageLifecycle, null, 'Delivery lifecycle'], testing: [pageTesting, afterTesting, 'Testing'],
     architecture: [pageArchitecture, afterArchitecture, 'Architecture'], team: [pageTeam, null, 'Team'], governance: [pageGovernance, null, 'Governance'], about: [pageAbout, null, 'About'],
