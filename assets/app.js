@@ -405,7 +405,7 @@
       const n = rec ? rec.list.filter(isOpen).length : 0;
       if (n) why.push(`${r.item}: due ${fmtD(r.finishD)} with ${n} ${rec.what}`);
     }
-    const p = /coaching knowledge capture/i.test(r.item) ? pace() : null;
+    const p = isPaceRow(r) ? pace() : null;
     if (p && p.behind) why.push(`${r.item}: ${p.text}`);
     return { s: why.length ? 'risk' : 'track', why };
   }
@@ -446,12 +446,17 @@
       test(rule.stage && '^(' + rule.stage + ')$', r.stage) && test(rule.group, r.group) && test(rule.item, r.item));
     return rowsState(rows);
   }
-  // The coaching questions' pace since Vince's weekly minimum began: fully answered against the straight
-  // line that finishes capture on its schedule date, and, after a week, where the last two weeks' pace leads.
+  // The audit questions' pace since the feed began reading the analyst's count: answered against the straight
+  // line that finishes them by the schedule stage the feed names (the coaching knowledge requirements and
+  // design baseline, Project Director 2026-11-25), and, after a week, where the last two weeks' pace leads.
+  function isPaceRow(r) {
+    const item = (S.feed.static && S.feed.static.coachingPaceItem) || 'coaching knowledge capture';
+    return String(r.item || '').toLowerCase().includes(String(item).toLowerCase());
+  }
   function pace() {
     const st = S.feed.static || {};
     const start = parseDate(st.coachingPaceStart), w = questionLane();
-    const row = schedule().find(r => /coaching knowledge capture/i.test(r.item));
+    const row = schedule().find(isPaceRow);
     if (!start || !w || !row || !row.finishD) return null;
     const hist = (S.feed.history || []).filter(p => p[w.id]).map(p => ({ d: parseDate(p.date), c: p[w.id].c })).filter(p => p.d);
     if (!hist.length) return null;
@@ -464,8 +469,8 @@
       res.rate = (now - upTo(new Date(+today - span * DAY))) / span;
       res.projected = res.rate > 0 ? new Date(+today + Math.ceil((total - now) / res.rate) * DAY) : null;
       res.behind = !res.projected || res.projected > row.finishD;
-      res.text = res.projected ? `at the last ${span} days’ pace, capture finishes about ${fmtD(res.projected)}, after ${fmtD(row.finishD)}`
-        : `none fully answered in the last ${span} days, so capture won’t finish by ${fmtD(row.finishD)}`;
+      res.text = res.projected ? `at the last ${span} days’ pace, the audit questions are all answered about ${fmtD(res.projected)}, after ${fmtD(row.finishD)}`
+        : `none answered in the last ${span} days, so the audit questions won’t be finished by ${fmtD(row.finishD)}`;
     }
     return res;
   }
@@ -481,8 +486,9 @@
     return `${say([x, u1])} to ${say([y, u2])} after target`;
   }
 
-  // Coaching questions newly fully answered this week (since Monday), from the daily counts, against
-  // Vince's weekly minimum (2026-11-01).
+  // Audit questions newly answered this week (since Monday), from the daily counts, against Vince's weekly
+  // minimum (2026-11-01). It shows from the first full week of the count (Project Director, 2026-11-25), so
+  // a part week after the count began isn't shown as falling short.
   function coachingWeek() {
     const min = S.feed.static && S.feed.static.coachingWeeklyMin;
     const w = questionLane();
@@ -491,12 +497,14 @@
     const now = new Date();
     const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
     const key = mon.getFullYear() + '-' + String(mon.getMonth() + 1).padStart(2, '0') + '-' + String(mon.getDate()).padStart(2, '0');
+    const from = S.feed.static && S.feed.static.coachingPaceStart;
+    if (from && from > key) return null;
     const before = h.filter(p => p.date < key);
     const base = (before.length ? before[before.length - 1] : h[0])[w.id].c;
     return { done: Math.max(0, w.progress.complete - base), min };
   }
   const pColor = w => { const m = (w.progress && w.progress.measure) || ''; return /scope/i.test(m) ? css('--teal') : /question/i.test(m) ? css('--purple') : mColor(w.mission); };
-  const measureLabel = m => /scope/i.test(m) ? 'product capabilities fully defined' : /question/i.test(m) ? 'coaching questions fully answered' : String(m || '').toLowerCase();
+  const measureLabel = m => /scope/i.test(m) ? 'product capabilities fully defined' : /question/i.test(m) ? 'audit questions answered' : String(m || '').toLowerCase();
 
   // ---------- menus ----------
   // Status (the home page and its detail pages), then Governance, Requirements and design, and Testing
@@ -872,7 +880,7 @@
     const kpi = (v, small, label, w, grad) => `<div class="kpi rise"><div class="v"><span data-count="${v}">${v}</span>${small ? `<small>${small}</small>` : ''}</div><div class="l">${esc(label)}</div>${w ? `<div class="spark"><i data-w="${w}" style="width:0;background:${grad}"></i></div>` : ''}</div>`;
     const kpis = prog.map((w, i) => kpi(w.progress.complete, '/' + w.progress.total, measureLabel(w.progress.measure), (w.progress.complete / w.progress.total * 100).toFixed(1) + '%',
       /question/i.test(w.progress.measure) ? `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})` : `linear-gradient(90deg, ${css('--teal')}, ${css('--sky')})`)).join('') +
-      (wk ? kpi(wk.done, '/' + wk.min, 'coaching questions this week, your minimum ' + wk.min, Math.min(100, wk.done / wk.min * 100).toFixed(1) + '%', `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})`)
+      (wk ? kpi(wk.done, '/' + wk.min, 'audit questions this week, your minimum ' + wk.min, Math.min(100, wk.done / wk.min * 100).toFixed(1) + '%', `linear-gradient(90deg, ${css('--violet')}, ${css('--purple')})`)
         : kpi(decCount, '', 'decisions recorded', '100%', `linear-gradient(90deg, ${css('--sky')}, ${css('--violet')})`)) +
       (days != null ? kpi(days, ' days', 'to the ' + fmtLong(launch.targetD) + ' launch target', '', '') : '');
     return `
@@ -1060,10 +1068,10 @@
     if (!p) return '';
     const left = p.total - p.now;
     const lineTxt = p.rate == null ? `The pace shows after the first full week, ${fmtD(new Date(+p.start + 7 * DAY))}.`
-      : p.behind ? 'At risk: ' + p.text + '.' : `At the last ${p.span} days’ pace, capture finishes about ${fmtD(p.projected)}, on time.`;
-    return `<div class="card rise"><h3>Coaching questions pace</h3>
+      : p.behind ? 'At risk: ' + p.text + '.' : `At the last ${p.span} days’ pace, the audit questions are all answered about ${fmtD(p.projected)}, on time.`;
+    return `<div class="card rise"><h3>Audit questions pace</h3>
       <div class="sub">${wk ? `${wk.done} of ${wk.min} this week · ` : ''}${left} left, about ${p.needPerWeek} a week to finish by ${esc(fmtD(p.finish))}</div>
-      <div class="chart" id="paceChart" style="height:240px"></div><p class="sub">${esc(lineTxt)} Main questions fully answered, counted from Jira each day.</p></div>`;
+      <div class="chart" id="paceChart" style="height:240px"></div><p class="sub">${esc(lineTxt)} Audit questions answered, from the coaching knowledge analyst’s count.</p></div>`;
   }
   function drawPace(el) {
     const p = pace();
